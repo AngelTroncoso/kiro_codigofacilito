@@ -129,37 +129,41 @@ export class UISystem {
 
     let overlay = contenedorHTML.querySelector(`#${OVERLAY_ROOT_ID}`);
     if (!overlay) {
+      // Estética "Cyber-Glassmorphism": el aspecto visual (fondo de
+      // cristal translúcido, blur, bordes/sombras neón, tipografía) vive
+      // en las clases CSS declaradas en `index.html` (`.hud-card`,
+      // `.hud-title`, `.hud-skill-badge`, `.hud-key-badge`, etc.), NO en
+      // estilos inline aquí. Esto mantiene esta clase enfocada en
+      // estructura/contenido (los ids que el resto del sistema y los
+      // tests dependen de) en vez de mezclar detalles visuales; solo se
+      // usan estilos inline puntuales para el posicionamiento `fixed` de
+      // cada tarjeta (que no es puramente estético) y para el
+      // `display`/`borderLeft` dinámico del mensaje contextual.
       overlay = doc.createElement('div');
       overlay.id = OVERLAY_ROOT_ID;
+      overlay.className = 'hud-overlay';
       overlay.style.position = 'fixed';
       overlay.style.top = '0';
       overlay.style.left = '0';
       overlay.style.width = '100%';
       overlay.style.pointerEvents = 'none';
       overlay.style.zIndex = '1000';
-      overlay.style.fontFamily = 'sans-serif';
 
       const indicador = doc.createElement('div');
       indicador.id = 'ui-system-habilidades';
+      indicador.className = 'hud-card hud-card--skills';
       indicador.style.position = 'fixed';
       indicador.style.top = '12px';
       indicador.style.left = '12px';
-      indicador.style.padding = '8px 12px';
-      indicador.style.borderRadius = '8px';
-      indicador.style.background = 'rgba(20, 20, 30, 0.75)';
-      indicador.style.color = '#f5f5f5';
       overlay.appendChild(indicador);
 
       const mensaje = doc.createElement('div');
       mensaje.id = 'ui-system-mensaje';
+      mensaje.className = 'hud-card hud-card--message';
       mensaje.style.position = 'fixed';
       mensaje.style.bottom = '24px';
       mensaje.style.left = '50%';
       mensaje.style.transform = 'translateX(-50%)';
-      mensaje.style.padding = '10px 16px';
-      mensaje.style.borderRadius = '8px';
-      mensaje.style.background = 'rgba(20, 20, 30, 0.85)';
-      mensaje.style.color = '#f5f5f5';
       overlay.appendChild(mensaje);
 
       // Panel de controles: estático (no depende de `progreso` ni cambia
@@ -169,36 +173,41 @@ export class UISystem {
       // ni con el mensaje contextual (abajo-centro).
       const panelControles = doc.createElement('div');
       panelControles.id = 'ui-system-controles';
+      panelControles.className = 'hud-card hud-card--controls';
       panelControles.style.position = 'fixed';
       panelControles.style.bottom = '12px';
       panelControles.style.right = '12px';
-      panelControles.style.padding = '8px 12px';
-      panelControles.style.borderRadius = '8px';
-      panelControles.style.background = 'rgba(20, 20, 30, 0.75)';
-      panelControles.style.color = '#f5f5f5';
-      panelControles.style.fontSize = '13px';
-      panelControles.style.lineHeight = '1.5';
 
       const tituloControles = doc.createElement('div');
       tituloControles.textContent = 'Controles';
-      tituloControles.style.fontWeight = 'bold';
-      tituloControles.style.marginBottom = '4px';
+      tituloControles.className = 'hud-title';
       panelControles.appendChild(tituloControles);
 
       const listaControles = doc.createElement('ul');
-      listaControles.style.margin = '0';
-      listaControles.style.padding = '0';
-      listaControles.style.listStyle = 'none';
+      listaControles.className = 'hud-controls-list';
 
+      // Cada control se separa en {tecla, accion} para poder envolver la
+      // tecla en un badge estilizado (`.hud-key-badge`) distinto del texto
+      // de la acción, en vez de un único nodo de texto plano.
       const controles = [
-        'W A S D / Flechas — Mover',
-        'Espacio — Saltar',
-        'Mouse — Rotar cámara',
-        'E — Interactuar / Absorber',
+        { tecla: 'W A S D / Flechas', accion: 'Mover' },
+        { tecla: 'Espacio', accion: 'Saltar' },
+        { tecla: 'Mouse', accion: 'Rotar cámara' },
+        { tecla: 'E', accion: 'Interactuar / Absorber' },
       ];
-      for (const textoControl of controles) {
+      for (const { tecla, accion } of controles) {
         const item = doc.createElement('li');
-        item.textContent = textoControl;
+
+        const badgeTecla = doc.createElement('span');
+        badgeTecla.className = 'hud-key-badge';
+        badgeTecla.textContent = tecla;
+        item.appendChild(badgeTecla);
+
+        const textoAccion = doc.createElement('span');
+        textoAccion.className = 'hud-control-accion';
+        textoAccion.textContent = `— ${accion}`;
+        item.appendChild(textoAccion);
+
         listaControles.appendChild(item);
       }
       panelControles.appendChild(listaControles);
@@ -209,16 +218,38 @@ export class UISystem {
     }
 
     const indicador = overlay.querySelector('#ui-system-habilidades');
-    const habilidadesTexto = vista.habilidadesObtenidas.size > 0
-      ? `Habilidades: ${Array.from(vista.habilidadesObtenidas).join(', ')}`
-      : 'Habilidades: ninguna todavía';
-    indicador.textContent = habilidadesTexto;
+    // Se reconstruye el contenido del indicador con un título fijo y un
+    // badge por habilidad obtenida (`.hud-skill-badge`), preservando el id
+    // crudo de cada habilidad (p. ej. "python") como texto del badge, ya
+    // que es el identificador estable que el resto del sistema (y los
+    // tests) esperan poder ubicar dentro de `indicador.textContent`.
+    indicador.textContent = '';
+    const tituloHabilidades = overlay.ownerDocument.createElement('div');
+    tituloHabilidades.className = 'hud-title';
+    tituloHabilidades.textContent = 'Habilidades';
+    indicador.appendChild(tituloHabilidades);
+
+    if (vista.habilidadesObtenidas.size > 0) {
+      for (const habilidadId of vista.habilidadesObtenidas) {
+        const badge = overlay.ownerDocument.createElement('span');
+        badge.className = 'hud-skill-badge';
+        badge.textContent = habilidadId;
+        indicador.appendChild(badge);
+      }
+    } else {
+      const vacio = overlay.ownerDocument.createElement('span');
+      vacio.className = 'hud-skill-empty';
+      vacio.textContent = 'ninguna todavía';
+      indicador.appendChild(vacio);
+    }
 
     const mensaje = overlay.querySelector('#ui-system-mensaje');
     if (vista.mensajeActivo) {
       mensaje.textContent = vista.mensajeActivo.texto;
       mensaje.style.display = 'block';
-      mensaje.style.borderLeft = vista.mensajeActivo.esError ? '4px solid #e07a5f' : '4px solid #81b29a';
+      mensaje.style.borderLeft = vista.mensajeActivo.esError
+        ? `4px solid var(--hud-accent-danger, #f87171)`
+        : `4px solid var(--hud-accent-cyan, #38bdf8)`;
     } else {
       mensaje.textContent = '';
       mensaje.style.display = 'none';

@@ -136,25 +136,67 @@ describe('AssetLoader - respaldo de geometría primitiva (usarRespaldoSiFalla)',
       expect(modelo).toBeInstanceOf(THREE.Group);
       expect(modelo.userData.esRespaldo).toBe(true);
       expect(modelo.userData.assetId).toBe('codi');
-      // Confirma que es un modelo compuesto real (torso, panza, cabeza,
-      // hocico, ojos, cola, crestas...) y no un único mesh.
+      // Confirma que es un modelo compuesto real (torso, vientre, cabeza,
+      // hocico, ojos, patas, brazos, cola, crestas...) y no un único mesh.
       expect(modelo.children.length).toBeGreaterThanOrEqual(5);
     });
 
-    it('genera una caja grande marrón para categoria="entorno"', () => {
+    it('expone userData.partesAnimables con patasTraseras, brazos y cola para el ciclo de caminata', () => {
+      const loader = new AssetLoader({ gltfLoader: createGltfLoaderMock({}) });
+      const modelo = loader.crearGeometriaRespaldo({ id: 'codi', categoria: 'codi' });
+
+      const { partesAnimables } = modelo.userData;
+      expect(partesAnimables).toBeDefined();
+      expect(partesAnimables.patasTraseras).toHaveLength(2);
+      expect(partesAnimables.brazos).toHaveLength(2);
+      expect(partesAnimables.cola).toBeInstanceOf(THREE.Group);
+
+      for (const pivotPata of partesAnimables.patasTraseras) {
+        expect(pivotPata).toBeInstanceOf(THREE.Group);
+        expect(modelo.children).toContain(pivotPata);
+      }
+      for (const pivotBrazo of partesAnimables.brazos) {
+        expect(pivotBrazo).toBeInstanceOf(THREE.Group);
+        expect(modelo.children).toContain(pivotBrazo);
+      }
+      expect(modelo.children).toContain(partesAnimables.cola);
+    });
+
+    it('el vientre amarillo (0xfbcd16) y los dientes blancos triangulares están presentes entre los hijos', () => {
+      const loader = new AssetLoader({ gltfLoader: createGltfLoaderMock({}) });
+      const modelo = loader.crearGeometriaRespaldo({ id: 'codi', categoria: 'codi' });
+
+      const tieneMallaConColor = (hexColor) =>
+        modelo.children.some(
+          (hijo) => hijo.isMesh && hijo.material && hijo.material.color.getHex() === hexColor
+        );
+
+      expect(tieneMallaConColor(0xfbcd16)).toBe(true);
+
+      const dientes = modelo.children.filter(
+        (hijo) => hijo.isMesh && hijo.geometry.type === 'ConeGeometry' && hijo.material.color.getHex() === 0xffffff
+      );
+      expect(dientes.length).toBeGreaterThanOrEqual(4);
+    });
+
+    it('genera una plataforma metalizada oscura (estética cyberpunk) para categoria="entorno"', () => {
       const loader = new AssetLoader({ gltfLoader: createGltfLoaderMock({}) });
       const mesh = loader.crearGeometriaRespaldo({ id: 'entorno-x', categoria: 'entorno' });
 
       expect(mesh.geometry.type).toBe('BoxGeometry');
-      expect(mesh.material.color.getHex()).toBe(0x8d6e63);
+      expect(mesh.material.color.getHex()).toBe(0x1e293b);
+      expect(mesh.material.roughness).toBeCloseTo(0.85);
+      expect(mesh.material.metalness).toBeCloseTo(0.6);
     });
 
-    it('genera una caja mediana azul/gris para categoria="mecanismo"', () => {
+    it('genera un módulo metalizado con acento emissive cian para categoria="mecanismo"', () => {
       const loader = new AssetLoader({ gltfLoader: createGltfLoaderMock({}) });
       const mesh = loader.crearGeometriaRespaldo({ id: 'mecanismo-x', categoria: 'mecanismo' });
 
       expect(mesh.geometry.type).toBe('BoxGeometry');
-      expect(mesh.material.color.getHex()).toBe(0x5c8aab);
+      expect(mesh.material.color.getHex()).toBe(0x0f172a);
+      expect(mesh.material.emissive.getHex()).toBe(0x06b6d4);
+      expect(mesh.material.emissiveIntensity).toBeCloseTo(0.3);
     });
 
     it('genera una caja pequeña dorada para categoria="libro"', () => {

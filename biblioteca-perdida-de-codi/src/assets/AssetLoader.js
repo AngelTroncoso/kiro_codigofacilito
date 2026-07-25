@@ -215,13 +215,15 @@ export class AssetLoader {
    * respaldo (placeholder visual) cuando el GLB real de una entrada del
    * manifiesto no existe o falla al cargar (ver `usarRespaldoSiFalla`).
    *
-   * La geometría/color elegidos dependen de `entry.categoria` (si se omite,
-   * se usa un cubo genérico gris):
+   * La geometría/material elegidos dependen de `entry.categoria` (si se
+   * omite, se usa un cubo genérico gris):
    *   - `'codi'`: modelo procedural compuesto (`THREE.Group`) que aproxima
    *     la silueta reconocible de la mascota — ver `_crearModeloCodiProcedural`.
-   *   - `'entorno'`: caja grande y plana, marrón/tierra — plataforma de
-   *     suelo básica.
-   *   - `'mecanismo'`: caja mediana, azul/gris.
+   *   - `'entorno'`: caja grande y plana, plataforma metalizada oscura
+   *     (tono servidor/espacio, alto roughness/metalness) — ver
+   *     estética cyberpunk/sci-fi de la "Biblioteca del Código".
+   *   - `'mecanismo'`: caja mediana, mismo metal oscuro de base pero con
+   *     `emissive` cian para simular circuitos/módulos de código activos.
    *   - `'libro'`: caja pequeña, dorado/amarillo.
    *   - default/`'generico'`: cubo 1x1x1 gris.
    *
@@ -247,28 +249,44 @@ export class AssetLoader {
     }
 
     let geometria;
-    let color;
+    let material;
 
     switch (categoria) {
       case 'entorno':
+        // Plataforma metalizada oscura tipo "servidor/espacio" (estética
+        // cyberpunk/sci-fi de la Biblioteca del Código): alto roughness y
+        // metalness para un acabado industrial, sin emissive (superficie
+        // pasiva, no un módulo activo).
         geometria = new THREE.BoxGeometry(10, 0.5, 10);
-        color = 0x8d6e63;
+        material = new THREE.MeshStandardMaterial({
+          color: 0x1e293b,
+          roughness: 0.85,
+          metalness: 0.6,
+        });
         break;
       case 'mecanismo':
+        // Mismo metal oscuro de base que las plataformas, pero con un
+        // acento emissive cian para simular circuitos/módulos de código
+        // activos (interactivo, se distingue visualmente del entorno pasivo).
         geometria = new THREE.BoxGeometry(1.5, 1, 1.5);
-        color = 0x5c8aab;
+        material = new THREE.MeshStandardMaterial({
+          color: 0x0f172a,
+          roughness: 0.7,
+          metalness: 0.5,
+          emissive: 0x06b6d4,
+          emissiveIntensity: 0.3,
+        });
         break;
       case 'libro':
         geometria = new THREE.BoxGeometry(0.4, 0.5, 0.3);
-        color = 0xf4c430;
+        material = new THREE.MeshStandardMaterial({ color: 0xf4c430 });
         break;
       default:
         geometria = new THREE.BoxGeometry(1, 1, 1);
-        color = 0x999999;
+        material = new THREE.MeshStandardMaterial({ color: 0x999999 });
         break;
     }
 
-    const material = new THREE.MeshStandardMaterial({ color });
     const mesh = new THREE.Mesh(geometria, material);
     mesh.userData.esRespaldo = true;
     mesh.userData.assetId = entry.id;
@@ -277,95 +295,207 @@ export class AssetLoader {
   }
 
   /**
-   * Construye un modelo procedural compuesto de Codi (la mascota: un
-   * cocodrilo/caimán verde cartoon con panza amarilla a rayas, ojos grandes
-   * y expresivos, hocico alargado y cola) combinando primitivas simples de
-   * Three.js con `MeshStandardMaterial`, ensambladas como hijos de un único
+   * Construye un modelo procedural compuesto de Codi (la mascota oficial: un
+   * cocodrilo/caimán verde esmeralda con vientre amarillo cálido a rayas de
+   * escamas, ojos grandes y expresivos, hocico alargado con dientes
+   * visibles, patas y brazos, y una cresta de picos que recorre el lomo
+   * hasta la punta de la cola) combinando primitivas simples de Three.js
+   * con `MeshStandardMaterial`, ensambladas como hijos de un único
    * `THREE.Group`.
    *
    * Piezas incluidas (todas hijas directas o anidadas del `Group` devuelto):
-   *   - Torso: esfera verde achatada (nodo base).
-   *   - Panza: esfera amarilla más pequeña, superpuesta al frente/abajo del
-   *     torso (color sólido diferenciado — suficiente para el MVP, sin
-   *     textura de rayas real).
-   *   - Cabeza: esfera verde sobre/adelante del torso.
-   *   - Hocico: caja alargada y achatada, verde, saliendo hacia adelante de
-   *     la cabeza.
-   *   - Ojos: dos esferas blancas con una pupila negra más pequeña anidada
-   *     como hijo de cada una.
-   *   - Cola: cono verde alargado, saliendo hacia atrás del torso.
-   *   - Crestas: dos conos pequeños verdes sobre el lomo (detalle opcional).
+   *   - Cuerpo: torso ovoide verde esmeralda/neón (con un ligero `emissive`
+   *     para el efecto "neón") y una placa de vientre amarilla cálida
+   *     (`0xfbcd16`) con líneas de escamas horizontales (anillos delgados)
+   *     superpuestas.
+   *   - Cabeza y rostro: hocico alargado y plano con fosas nasales,
+   *     dientes triangulares blancos visibles a los lados de la mandíbula,
+   *     y dos ojos grandes (esferas blancas con pupila negra anidada)
+   *     orientados al frente.
+   *   - Extremidades: dos patas traseras cortas y firmes (con garras
+   *     pequeñas) y dos brazos delanteros, cada uno montado sobre un
+   *     `THREE.Group` "pivote" (hombro/cadera) en vez de directamente sobre
+   *     el torso, para poder rotarlos de forma creíble en el ciclo de
+   *     caminata (ver `userData.partesAnimables` más abajo).
+   *   - Cresta y cola: picos (conos) verdes alineados sobre el lomo, más
+   *     una cola (cono alargado) montada sobre su propio `Group` pivote en
+   *     la base, con picos adicionales más pequeños hasta la punta.
    *
-   * Altura total aproximada ~1.6 unidades, en línea con la cápsula de
-   * respaldo previa, para no alterar las proporciones relativas al resto de
-   * la escena (jugador/mundo).
+   * `userData.partesAnimables` expone las referencias a los `Group` pivote
+   * de patas traseras, brazos y cola (NO al torso/cabeza, que permanecen
+   * estáticos) para que `RenderEngine`/`actualizarCicloCaminata` pueda
+   * oscilarlos en cada frame según la velocidad de Codi, sin que quien
+   * anime necesite conocer la jerarquía interna completa del modelo:
+   *   `{ patasTraseras: [Group, Group], brazos: [Group, Group], cola: Group }`
+   *
+   * Altura total aproximada ~1.3 unidades (pies a la altura del suelo
+   * `y≈0`, cabeza hasta `y≈1.28`), en línea con las proporciones previas
+   * para no alterar demasiado la relación con el resto de la escena
+   * (jugador/mundo).
    *
    * @private
    * @returns {import('three').Group}
    */
   _crearModeloCodiProcedural() {
-    const VERDE = 0x2ecc71;
-    const AMARILLO = 0xf4c430;
+    const VERDE = 0x1fce6b; // verde neón/esmeralda
+    const VERDE_OSCURO = 0x188a52; // detalle de garras
+    const AMARILLO_VIENTRE = 0xfbcd16; // vientre, amarillo cálido oficial
+    const AMARILLO_ESCAMA = 0xd9a915; // líneas de escamas del vientre, tono más oscuro
     const BLANCO = 0xffffff;
     const NEGRO = 0x1a1a1a;
 
-    const materialVerde = new THREE.MeshStandardMaterial({ color: VERDE });
-    const materialAmarillo = new THREE.MeshStandardMaterial({ color: AMARILLO });
+    const materialVerde = new THREE.MeshStandardMaterial({
+      color: VERDE,
+      emissive: new THREE.Color(VERDE),
+      emissiveIntensity: 0.12,
+    });
+    const materialVerdeOscuro = new THREE.MeshStandardMaterial({ color: VERDE_OSCURO });
+    const materialVientre = new THREE.MeshStandardMaterial({ color: AMARILLO_VIENTRE });
+    const materialEscama = new THREE.MeshStandardMaterial({ color: AMARILLO_ESCAMA });
     const materialBlanco = new THREE.MeshStandardMaterial({ color: BLANCO });
     const materialNegro = new THREE.MeshStandardMaterial({ color: NEGRO });
 
     const grupo = new THREE.Group();
 
-    // Torso: esfera verde achatada para dar forma ovalada de cuerpo.
-    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), materialVerde);
-    torso.scale.set(1, 0.75, 1.2);
-    torso.position.set(0, 0.5, 0);
+    // --- Cuerpo y vientre ---
+
+    // Torso: esfera verde ovoide (nodo base del cuerpo).
+    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.42, 20, 16), materialVerde);
+    torso.scale.set(1, 0.8, 1.35);
+    torso.position.set(0, 0.62, 0);
     grupo.add(torso);
 
-    // Panza amarilla: esfera más pequeña, al frente/abajo del torso,
-    // ligeramente superpuesta.
-    const panza = new THREE.Mesh(new THREE.SphereGeometry(0.38, 16, 12), materialAmarillo);
-    panza.scale.set(0.9, 0.7, 0.7);
-    panza.position.set(0, 0.35, 0.28);
-    grupo.add(panza);
+    // Vientre: placa amarilla cálida, ligeramente curvada, superpuesta al
+    // frente/abajo del torso.
+    const vientre = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 12), materialVientre);
+    vientre.scale.set(0.85, 0.6, 0.62);
+    vientre.position.set(0, 0.42, 0.32);
+    grupo.add(vientre);
 
-    // Cabeza: esfera verde arriba/adelante del torso.
-    const cabeza = new THREE.Mesh(new THREE.SphereGeometry(0.32, 16, 12), materialVerde);
-    cabeza.position.set(0, 0.95, 0.35);
+    // Líneas/textura de escamas horizontales sobre el vientre: anillos
+    // delgados que lo envuelven a distintas alturas.
+    const alturasEscamas = [0.26, 0.36, 0.46];
+    for (const y of alturasEscamas) {
+      const lineaEscama = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.015, 6, 16), materialEscama);
+      lineaEscama.rotation.x = Math.PI / 2;
+      lineaEscama.position.set(0, y, 0.3);
+      grupo.add(lineaEscama);
+    }
+
+    // --- Cabeza y rostro ---
+
+    const cabeza = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 12), materialVerde);
+    cabeza.scale.set(1, 0.85, 1);
+    cabeza.position.set(0, 1.02, 0.38);
     grupo.add(cabeza);
 
-    // Hocico: caja alargada y achatada saliendo hacia adelante de la cabeza.
-    const hocico = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.18, 0.5), materialVerde);
-    hocico.position.set(0, 0.85, 0.72);
+    // Hocico alargado y plano, saliendo hacia adelante de la cabeza.
+    const hocico = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.55), materialVerde);
+    hocico.position.set(0, 0.93, 0.78);
     grupo.add(hocico);
 
-    // Ojos: dos esferas blancas con pupila negra anidada.
-    const offsetsOjos = [-0.14, 0.14];
+    // Fosas nasales, en la punta superior del hocico.
+    const offsetsNarinas = [-0.06, 0.06];
+    for (const x of offsetsNarinas) {
+      const narina = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), materialNegro);
+      narina.position.set(x, 1.0, 1.02);
+      grupo.add(narina);
+    }
+
+    // Dientes triangulares blancos, visibles a los lados de la mandíbula.
+    const offsetsDientes = [-0.12, -0.05, 0.05, 0.12];
+    for (const x of offsetsDientes) {
+      const diente = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.07, 4), materialBlanco);
+      diente.rotation.x = Math.PI;
+      diente.position.set(x, 0.865, 0.95);
+      grupo.add(diente);
+    }
+
+    // Ojos grandes y expresivos, orientados al frente, con pupila negra anidada.
+    const offsetsOjos = [-0.15, 0.15];
     for (const offsetX of offsetsOjos) {
-      const ojo = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), materialBlanco);
-      ojo.position.set(offsetX, 1.15, 0.42);
+      const ojo = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 10), materialBlanco);
+      ojo.position.set(offsetX, 1.18, 0.5);
       grupo.add(ojo);
 
-      const pupila = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), materialNegro);
-      // Posición relativa al ojo (hijo de la esfera blanca): ligeramente
-      // adelante/arriba, simulando la pupila.
-      pupila.position.set(0, 0.02, 0.07);
+      const pupila = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), materialNegro);
+      pupila.position.set(0, 0, 0.08);
       ojo.add(pupila);
     }
 
-    // Cola: cono verde alargado saliendo hacia atrás del torso.
-    const cola = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.9, 8), materialVerde);
-    cola.rotation.x = Math.PI / 2;
-    cola.position.set(0, 0.45, -0.75);
-    grupo.add(cola);
+    // --- Extremidades ---
 
-    // Crestas: pequeños conos verdes sobre el lomo (detalle opcional).
-    const offsetsCrestas = [-0.15, 0.15];
-    for (const offsetZ of offsetsCrestas) {
-      const cresta = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.14, 8), materialVerde);
-      cresta.position.set(0, 0.92, offsetZ);
+    // Patas traseras: cortas y firmes, cada una sobre un Group pivote (la
+    // cadera) para poder rotarlas de forma creíble en el ciclo de caminata,
+    // con pequeñas garras en la punta.
+    const patasTraseras = [];
+    const offsetsPatasTraseras = [-0.24, 0.24];
+    for (const x of offsetsPatasTraseras) {
+      const pivotPata = new THREE.Group();
+      pivotPata.position.set(x, 0.34, -0.12);
+      grupo.add(pivotPata);
+
+      const pata = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.32, 8), materialVerde);
+      pata.position.set(0, -0.16, 0);
+      pivotPata.add(pata);
+
+      const offsetsGarras = [-0.05, 0, 0.05];
+      for (const gx of offsetsGarras) {
+        const garra = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.06, 6), materialVerdeOscuro);
+        garra.rotation.x = Math.PI / 2;
+        garra.position.set(gx, -0.32, 0.07);
+        pivotPata.add(garra);
+      }
+
+      patasTraseras.push(pivotPata);
+    }
+
+    // Brazos: dos brazos superiores, cada uno sobre un Group pivote (el
+    // hombro) para el ciclo de caminata.
+    const brazos = [];
+    const offsetsBrazos = [-0.34, 0.34];
+    for (const x of offsetsBrazos) {
+      const pivotBrazo = new THREE.Group();
+      pivotBrazo.position.set(x, 0.58, 0.15);
+      grupo.add(pivotBrazo);
+
+      const brazo = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.3, 8), materialVerde);
+      brazo.rotation.z = x < 0 ? 0.35 : -0.35;
+      brazo.position.set(0, -0.14, 0);
+      pivotBrazo.add(brazo);
+
+      brazos.push(pivotBrazo);
+    }
+
+    // --- Cresta y cola ---
+
+    // Picos de la cresta sobre el lomo (fijos, no animados).
+    const offsetsCrestaLomo = [-0.28, -0.08, 0.12, 0.32];
+    for (const z of offsetsCrestaLomo) {
+      const cresta = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.16, 6), materialVerde);
+      cresta.position.set(0, 0.98, z);
       grupo.add(cresta);
     }
+
+    // Cola: cono verde alargado sobre un Group pivote en la base, con picos
+    // adicionales de la cresta hasta la punta (todos animados junto con la cola).
+    const pivotCola = new THREE.Group();
+    pivotCola.position.set(0, 0.55, -0.55);
+    grupo.add(pivotCola);
+
+    const cola = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.85, 8), materialVerde);
+    cola.rotation.x = Math.PI / 2;
+    cola.position.set(0, 0, -0.4);
+    pivotCola.add(cola);
+
+    const offsetsCrestaCola = [-0.15, -0.35, -0.55, -0.75];
+    for (const z of offsetsCrestaCola) {
+      const crestaCola = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.12, 6), materialVerde);
+      crestaCola.position.set(0, 0.14, z);
+      pivotCola.add(crestaCola);
+    }
+
+    grupo.userData.partesAnimables = { patasTraseras, brazos, cola: pivotCola };
 
     return grupo;
   }

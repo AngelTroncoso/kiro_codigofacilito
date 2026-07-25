@@ -101,4 +101,58 @@ describe('UISystem - unit tests', () => {
     expect(panelControles.textContent).toContain('Rotar cámara');
     expect(panelControles.textContent).toContain('Interactuar');
   });
+
+  it('renderizarEnDOM aplica las clases del estilo Cyber-Glassmorphism a las tarjetas HUD (Panel de Habilidades, Mensaje, Controles)', () => {
+    const uiSystem = new UISystem();
+    const progreso = new ProgressStore();
+    progreso.otorgarHabilidad('python');
+    const contenedor = document.createElement('div');
+
+    uiSystem.mostrarMensaje('Mensaje de prueba', 3000, 1000);
+    uiSystem.renderizarEnDOM(contenedor, progreso, 1000);
+
+    const indicador = contenedor.querySelector('#ui-system-habilidades');
+    const mensaje = contenedor.querySelector('#ui-system-mensaje');
+    const panelControles = contenedor.querySelector('#ui-system-controles');
+
+    // Las tres tarjetas HUD comparten la clase base .hud-card (fondo de
+    // cristal + blur + borde + sombra, definidos en index.html).
+    expect(indicador.classList.contains('hud-card')).toBe(true);
+    expect(mensaje.classList.contains('hud-card')).toBe(true);
+    expect(panelControles.classList.contains('hud-card')).toBe(true);
+
+    // El indicador de habilidades usa un badge dedicado (verde Codi) por
+    // cada habilidad obtenida, conservando el id crudo como texto.
+    const badgeHabilidad = indicador.querySelector('.hud-skill-badge');
+    expect(badgeHabilidad).not.toBeNull();
+    expect(badgeHabilidad.textContent).toBe('python');
+
+    // El panel de controles resalta cada tecla dentro de un badge propio
+    // (`.hud-key-badge`), separado del texto de la acción.
+    const badgesTeclas = panelControles.querySelectorAll('.hud-key-badge');
+    expect(badgesTeclas.length).toBe(4);
+    expect(Array.from(badgesTeclas).map((b) => b.textContent)).toEqual([
+      'W A S D / Flechas',
+      'Espacio',
+      'Mouse',
+      'E',
+    ]);
+
+    // Los títulos de las tarjetas usan el acento cian neón (.hud-title).
+    expect(indicador.querySelector('.hud-title')).not.toBeNull();
+    expect(panelControles.querySelector('.hud-title')).not.toBeNull();
+  });
+
+  it('cuando no hay habilidades obtenidas, el indicador muestra el estado vacío ("ninguna todavía") sin badges', () => {
+    const uiSystem = new UISystem();
+    const progreso = new ProgressStore();
+    const contenedor = document.createElement('div');
+
+    uiSystem.renderizarEnDOM(contenedor, progreso, 1000);
+
+    const indicador = contenedor.querySelector('#ui-system-habilidades');
+    expect(indicador.textContent).toContain('ninguna todavía');
+    expect(indicador.querySelector('.hud-skill-badge')).toBeNull();
+    expect(indicador.querySelector('.hud-skill-empty')).not.toBeNull();
+  });
 });
