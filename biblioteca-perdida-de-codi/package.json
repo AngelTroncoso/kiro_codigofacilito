@@ -1,0 +1,21 @@
+{
+  "name": "biblioteca-perdida-de-codi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Codi y la Biblioteca Perdida del Código - juego de exploración 3D para la Hackatón de Código Facilito",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "three": "0.169.0"
+  },
+  "devDependencies": {
+    "fast-check": "3.22.0",
+    "jsdom": "25.0.1",
+    "vite": "5.4.10",
+    "vitest": "2.1.4"
+  }
+}
