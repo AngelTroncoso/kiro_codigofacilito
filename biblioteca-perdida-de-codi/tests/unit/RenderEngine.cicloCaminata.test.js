@@ -215,3 +215,435 @@ describe('RenderEngine - atmósfera cyberpunk/sci-fi (fondo, niebla, iluminació
     expect(modeloCodi.position.x).toBeCloseTo(3);
   });
 });
+
+describe('RenderEngine - SPEC-03 World Atmosphere & Rendering (iluminación, sombras, partículas, postprocesado)', () => {
+  it('agrega una HemisphereLight además de AmbientLight/DirectionalLight/PointLight', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    const hemisferio = renderEngine.scene.children.find((hijo) => hijo instanceof THREE.HemisphereLight);
+    expect(hemisferio).toBeDefined();
+  });
+
+  it('las intensidades de luces están parametrizadas vía config del constructor', () => {
+    const renderEngine = new RenderEngine(createCanvasMock(), {
+      intensidadAmbiental: 0.9,
+      intensidadHemisferio: 0.7,
+      intensidadDireccional: 1.5,
+      intensidadAcento: 20,
+    });
+    const luces = renderEngine.scene.children.filter((hijo) => hijo.isLight);
+
+    const ambiental = luces.find((luz) => luz instanceof THREE.AmbientLight);
+    const hemisferio = luces.find((luz) => luz instanceof THREE.HemisphereLight);
+    const direccional = luces.find((luz) => luz instanceof THREE.DirectionalLight);
+    const acento = luces.find((luz) => luz instanceof THREE.PointLight);
+
+    expect(ambiental.intensity).toBeCloseTo(0.9);
+    expect(hemisferio.intensity).toBeCloseTo(0.7);
+    expect(direccional.intensity).toBeCloseTo(1.5);
+    expect(acento.intensity).toBeCloseTo(20);
+  });
+
+  it('con config por defecto, las intensidades conservan los valores previos (sin regresión)', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    const luces = renderEngine.scene.children.filter((hijo) => hijo.isLight);
+
+    expect(luces.find((l) => l instanceof THREE.AmbientLight).intensity).toBeCloseTo(0.6);
+    expect(luces.find((l) => l instanceof THREE.DirectionalLight).intensity).toBeCloseTo(1.0);
+    expect(luces.find((l) => l instanceof THREE.PointLight).intensity).toBeCloseTo(8);
+  });
+
+  it('crea una sombra de contacto (blob shadow) bajo Codi que sigue su posición en X/Z', () => {
+    const { renderEngine, modeloCodi } = crearRenderEngineConCodi();
+    const sombra = renderEngine.scene.children.find(
+      (hijo) => hijo.isMesh && hijo.geometry?.type === 'CircleGeometry'
+    );
+    expect(sombra).toBeDefined();
+    expect(sombra.material.transparent).toBe(true);
+
+    const pose = {
+      position: { x: 5, y: 2, z: -1 },
+      rotationY: 0,
+      velocity: { x: 0, y: 0, z: 0 },
+      animState: 'idle',
+      lastSafePosition: { x: 5, y: 2, z: -1 },
+    };
+    renderEngine.render(pose, undefined);
+
+    expect(sombra.position.x).toBeCloseTo(5);
+    expect(sombra.position.z).toBeCloseTo(-1);
+    expect(modeloCodi.position.x).toBeCloseTo(5);
+  });
+
+  it('crea un único THREE.Points de partículas ambientales, recentrado sobre Codi en cada render', () => {
+    const { renderEngine } = crearRenderEngineConCodi();
+    const particulas = renderEngine.scene.children.filter((hijo) => hijo instanceof THREE.Points);
+    expect(particulas.length).toBe(1);
+
+    const pose = {
+      position: { x: -4, y: 1, z: 7 },
+      rotationY: 0,
+      velocity: { x: 0, y: 0, z: 0 },
+      animState: 'idle',
+      lastSafePosition: { x: -4, y: 1, z: 7 },
+    };
+    renderEngine.render(pose, undefined);
+
+    expect(particulas[0].position.x).toBeCloseTo(-4);
+    expect(particulas[0].position.z).toBeCloseTo(7);
+  });
+
+  it('las partículas ambientales respetan el presupuesto de rendimiento (<= 60 por el rango documentado)', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    const particulas = renderEngine.scene.children.find((hijo) => hijo instanceof THREE.Points);
+    const cantidad = particulas.geometry.attributes.position.count;
+    expect(cantidad).toBeGreaterThan(0);
+    expect(cantidad).toBeLessThanOrEqual(60);
+  });
+
+  it('las partículas ambientales ascienden con el tiempo y no lanzan tras muchos frames (reciclado)', () => {
+    const performanceNowSpy = vi.spyOn(performance, 'now');
+    let tiempoActualMs = 0;
+    performanceNowSpy.mockImplementation(() => tiempoActualMs);
+
+    const renderEngine = new RenderEngine(createCanvasMock());
+    const particulas = renderEngine.scene.children.find((hijo) => hijo instanceof THREE.Points);
+    const posicionesIniciales = Array.from(particulas.geometry.attributes.position.array);
+
+    renderEngine.render(undefined, undefined);
+    for (let i = 0; i < 200; i += 1) {
+      tiempoActualMs += 100;
+      expect(() => renderEngine.render(undefined, undefined)).not.toThrow();
+    }
+
+    const posicionesFinales = particulas.geometry.attributes.position.array;
+    const algunaCambio = Array.from(posicionesFinales).some((valor, i) => valor !== posicionesIniciales[i]);
+    expect(algunaCambio).toBe(true);
+
+    performanceNowSpy.mockRestore();
+  });
+
+  it('no lanza si usarPostprocesado=false (camino directo sin EffectComposer)', () => {
+    expect(() => new RenderEngine(createCanvasMock(), { usarPostprocesado: false })).not.toThrow();
+    const renderEngine = new RenderEngine(createCanvasMock(), { usarPostprocesado: false });
+    const poseCaminando = {
+      position: { x: 0, y: 1, z: 0 },
+      rotationY: 0,
+      velocity: { x: 1, y: 0, z: 0 },
+      animState: 'walk',
+      lastSafePosition: { x: 0, y: 1, z: 0 },
+    };
+    expect(() => renderEngine.render(poseCaminando, undefined)).not.toThrow();
+  });
+
+  it('con el WebGLRenderer mockeado (sin API completa de EffectComposer), la construcción no lanza y el render tampoco', () => {
+    // El mock de WebGLRendererMock (ver vi.mock('three', ...) arriba) no
+    // implementa getPixelRatio/getSize/getContext, por lo que
+    // EffectComposer debe fallar internamente y RenderEngine debe
+    // recuperarse sin propagar la excepción (comportamiento por defecto,
+    // usarPostprocesado=true).
+    expect(() => new RenderEngine(createCanvasMock())).not.toThrow();
+    const renderEngine = new RenderEngine(createCanvasMock());
+    expect(() => renderEngine.render(undefined, undefined)).not.toThrow();
+  });
+
+  it('onResize y dispose no lanzan incluso si el composer de postprocesado no se pudo construir', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    expect(() => renderEngine.onResize(1024, 768)).not.toThrow();
+    expect(() => renderEngine.dispose()).not.toThrow();
+  });
+});
+
+describe('RenderEngine - SPEC-03 World Atmosphere & Environmental Storytelling (sky gradient, tone mapping, detalles)', () => {
+  it('agrega una cúpula de Sky Gradient procedural (ShaderMaterial, BackSide) a la escena', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    const skyGradient = renderEngine.scene.children.find(
+      (hijo) => hijo.isMesh && hijo.material instanceof THREE.ShaderMaterial
+    );
+
+    expect(skyGradient).toBeDefined();
+    expect(skyGradient.geometry.type).toBe('SphereGeometry');
+    expect(skyGradient.material.side).toBe(THREE.BackSide);
+    expect(skyGradient.material.depthWrite).toBe(false);
+    expect(skyGradient.material.uniforms.uColorCenit).toBeDefined();
+    expect(skyGradient.material.uniforms.uColorHorizonte).toBeDefined();
+  });
+
+  it('configura ACESFilmicToneMapping en el renderer (corrección de color/tono)', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    expect(renderEngine.renderer.toneMapping).toBe(THREE.ACESFilmicToneMapping);
+    expect(renderEngine.renderer.toneMappingExposure).toBeCloseTo(1.05);
+  });
+
+  it('agrega detalles ambientales estáticos (cristales de conocimiento y glifos) sin registrarlos como modelos de gameplay', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    const grupoDetalles = renderEngine.scene.children.find(
+      (hijo) => hijo instanceof THREE.Group && hijo.children.some((c) => c.geometry?.type === 'OctahedronGeometry')
+    );
+
+    expect(grupoDetalles).toBeDefined();
+    const cristales = grupoDetalles.children.filter((c) => c.geometry.type === 'OctahedronGeometry');
+    const glifos = grupoDetalles.children.filter((c) => c.geometry.type === 'RingGeometry');
+    expect(cristales.length).toBeGreaterThan(0);
+    expect(glifos.length).toBeGreaterThan(0);
+
+    // No deben tener userData de interacción/gameplay (son puramente
+    // decorativos, no Mecanismos_Ambientales ni Libros_de_Conocimiento).
+    for (const detalle of grupoDetalles.children) {
+      expect(detalle.userData.esRespaldo).toBeUndefined();
+      expect(detalle.userData.assetId).toBeUndefined();
+    }
+  });
+
+  it('dispose() libera la geometría/material del Sky Gradient sin lanzar', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    expect(() => renderEngine.dispose()).not.toThrow();
+  });
+});
+
+describe('RenderEngine - SPEC-04 Character Polish: Codi (idle, blink, eye life, tail dynamics, expressiveness)', () => {
+  let performanceNowSpy;
+  let tiempoActualMs;
+  let randomSpy;
+
+  beforeEach(() => {
+    tiempoActualMs = 0;
+    performanceNowSpy = vi.spyOn(performance, 'now').mockImplementation(() => tiempoActualMs);
+  });
+
+  afterEach(() => {
+    performanceNowSpy.mockRestore();
+    randomSpy?.mockRestore();
+  });
+
+  function avanzarTiempo(ms) {
+    tiempoActualMs += ms;
+  }
+
+  function poseQuieta(overrides = {}) {
+    return {
+      position: { x: 0, y: 1, z: 0 },
+      rotationY: 0,
+      velocity: { x: 0, y: 0, z: 0 },
+      animState: 'idle',
+      lastSafePosition: { x: 0, y: 1, z: 0 },
+      ...overrides,
+    };
+  }
+
+  function poseCaminando(overrides = {}) {
+    return {
+      position: { x: 0, y: 1, z: 0 },
+      rotationY: 0,
+      velocity: { x: 2, y: 0, z: 0 },
+      animState: 'walk',
+      lastSafePosition: { x: 0, y: 1, z: 0 },
+      ...overrides,
+    };
+  }
+
+  it('Idle Animation: con Codi quieto, la cabeza oscila verticalmente (respiración) tras varios frames', () => {
+    const { renderEngine, modeloCodi } = crearRenderEngineConCodi();
+    const { cabeza } = modeloCodi.userData.partesAnimables;
+    const alturaBase = cabeza.position.y;
+
+    renderEngine.render(poseQuieta(), undefined);
+    const alturasObservadas = new Set();
+    for (let i = 0; i < 20; i += 1) {
+      avanzarTiempo(80);
+      renderEngine.render(poseQuieta(), undefined);
+      alturasObservadas.add(cabeza.position.y.toFixed(5));
+    }
+
+    // La altura debe variar entre frames (no queda congelada), pero dentro
+    // de un rango extremadamente sutil (sección 1: "nunca exageradas").
+    expect(alturasObservadas.size).toBeGreaterThan(1);
+    for (const valorTexto of alturasObservadas) {
+      expect(Math.abs(Number(valorTexto) - alturaBase)).toBeLessThan(0.02);
+    }
+  });
+
+  it('Idle Animation: al reanudar el movimiento, la cabeza vuelve suavemente a su altura base', () => {
+    const { renderEngine, modeloCodi } = crearRenderEngineConCodi();
+    const { cabeza } = modeloCodi.userData.partesAnimables;
+    const alturaBase = cabeza.position.y;
+
+    renderEngine.render(poseQuieta(), undefined);
+    for (let i = 0; i < 10; i += 1) {
+      avanzarTiempo(80);
+      renderEngine.render(poseQuieta(), undefined);
+    }
+
+    for (let i = 0; i < 30; i += 1) {
+      avanzarTiempo(80);
+      renderEngine.render(poseCaminando(), undefined);
+    }
+
+    expect(cabeza.position.y).toBeCloseTo(alturaBase, 2);
+  });
+
+  it('Blink System: ambos ojos escalan en Y de forma sincronizada durante un parpadeo forzado (probabilidad de parpadeo inmediato)', () => {
+    randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0); // fuerza tiempoHastaProximoParpadeo mínimo y sin doble parpadeo
+    const { renderEngine, modeloCodi } = crearRenderEngineConCodi();
+    const { ojos } = modeloCodi.userData.partesAnimables;
+
+    renderEngine.render(poseQuieta(), undefined);
+    // tiempoHastaProximoParpadeo con random()=0 es 2.5s; avanzamos justo eso.
+    avanzarTiempo(2500);
+    renderEngine.render(poseQuieta(), undefined);
+    // Un frame más adentro del parpadeo (mitad del cierre, ~0.08s).
+    avanzarTiempo(80);
+    renderEngine.render(poseQuieta(), undefined);
+
+    expect(ojos[0].scale.y).toBeLessThan(1);
+    expect(ojos[0].scale.y).toBeCloseTo(ojos[1].scale.y, 5); // sincronizado entre ambos ojos
+    expect(ojos[0].scale.y).toBeGreaterThan(0); // nunca colapsa a 0 exacto
+  });
+
+  it('Blink System: tras completar el ciclo de parpadeo, los ojos vuelven a escala 1 (abiertos)', () => {
+    // random()=0 fuerza el primer parpadeo lo antes posible; valores >=0.25
+    // en las siguientes llamadas evitan encadenar un doble parpadeo
+    // indefinido (artefacto del mock, no del comportamiento real, donde
+    // Math.random() varía naturalmente entre llamadas).
+    let primeraLlamada = true;
+    randomSpy = vi.spyOn(Math, 'random').mockImplementation(() => {
+      if (primeraLlamada) {
+        primeraLlamada = false;
+        return 0;
+      }
+      return 0.9;
+    });
+    const { renderEngine, modeloCodi } = crearRenderEngineConCodi();
+    const { ojos } = modeloCodi.userData.partesAnimables;
+
+    renderEngine.render(poseQuieta(), undefined);
+    avanzarTiempo(2500);
+    renderEngine.render(poseQuieta(), undefined);
+    // Avanza más allá de la duración completa del parpadeo (0.16s) para
+    // garantizar que termine en estado "abierto".
+    for (let i = 0; i < 10; i += 1) {
+      avanzarTiempo(50);
+      renderEngine.render(poseQuieta(), undefined);
+    }
+
+    expect(ojos[0].scale.y).toBeCloseTo(1, 5);
+    expect(ojos[1].scale.y).toBeCloseTo(1, 5);
+  });
+
+  it('Eye Life: con Codi quieto por un tiempo prolongado, la cabeza rota levemente en Y dentro de un rango mínimo', () => {
+    randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.9); // sesga offsetMiradaObjetivo hacia un extremo determinista
+    const { renderEngine, modeloCodi } = crearRenderEngineConCodi();
+    const { cabeza } = modeloCodi.userData.partesAnimables;
+
+    renderEngine.render(poseQuieta(), undefined);
+    for (let i = 0; i < 40; i += 1) {
+      avanzarTiempo(100);
+      renderEngine.render(poseQuieta(), undefined);
+    }
+
+    // Rango mínimo documentado: ±0.12 rad. No debe superarse.
+    expect(Math.abs(cabeza.rotation.y)).toBeGreaterThan(0);
+    expect(Math.abs(cabeza.rotation.y)).toBeLessThanOrEqual(0.13);
+  });
+
+  it('Eye Life: al reanudar el movimiento, la mirada ambiental vuelve hacia el frente (offset objetivo 0)', () => {
+    randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.9);
+    const { renderEngine, modeloCodi } = crearRenderEngineConCodi();
+    const { cabeza } = modeloCodi.userData.partesAnimables;
+
+    renderEngine.render(poseQuieta(), undefined);
+    for (let i = 0; i < 40; i += 1) {
+      avanzarTiempo(100);
+      renderEngine.render(poseQuieta(), undefined);
+    }
+
+    for (let i = 0; i < 40; i += 1) {
+      avanzarTiempo(100);
+      renderEngine.render(poseCaminando(), undefined);
+    }
+
+    expect(Math.abs(cabeza.rotation.y)).toBeLessThan(0.02);
+  });
+
+  it('Tail Dynamics: al iniciar movimiento desde quietud, la cola recibe un impulso de latigazo que luego se amortigua', () => {
+    const { renderEngine, modeloCodi } = crearRenderEngineConCodi();
+    const { cola } = modeloCodi.userData.partesAnimables;
+
+    renderEngine.render(poseQuieta(), undefined);
+    avanzarTiempo(50);
+    renderEngine.render(poseQuieta(), undefined);
+
+    const rotacionAntesDeAcelerar = cola.rotation.x;
+    avanzarTiempo(50);
+    renderEngine.render(poseCaminando({ velocity: { x: 3, y: 0, z: 0 } }), undefined);
+    const rotacionTrasAcelerar = cola.rotation.x;
+
+    expect(rotacionTrasAcelerar).not.toBeCloseTo(rotacionAntesDeAcelerar, 6);
+
+    // Tras muchos frames sin más cambios de velocidad, el latigazo debe
+    // amortiguarse (aproximarse a 0), no oscilar indefinidamente.
+    for (let i = 0; i < 60; i += 1) {
+      avanzarTiempo(50);
+      renderEngine.render(poseCaminando({ velocity: { x: 3, y: 0, z: 0 } }), undefined);
+    }
+    expect(Math.abs(renderEngine._estadoPersonalidadCodi.offsetLatigazoCola)).toBeLessThan(0.001);
+  });
+
+  it('Tail Dynamics: no lanza ante deltaSegundos<=0 ni ante velocidades extremas', () => {
+    const { renderEngine } = crearRenderEngineConCodi();
+    expect(() => renderEngine.render(poseCaminando({ velocity: { x: 1000, y: 0, z: 0 } }), undefined)).not.toThrow();
+  });
+
+  it('Expressiveness: al detenerse tras caminar, la cabeza dispara una breve inclinación (rotation.z) que vuelve a 0', () => {
+    const { renderEngine, modeloCodi } = crearRenderEngineConCodi();
+    const { cabeza } = modeloCodi.userData.partesAnimables;
+
+    renderEngine.render(poseCaminando(), undefined);
+    for (let i = 0; i < 5; i += 1) {
+      avanzarTiempo(80);
+      renderEngine.render(poseCaminando(), undefined);
+    }
+
+    // Transición a quieto: debe disparar la pose de inclinación.
+    avanzarTiempo(80);
+    renderEngine.render(poseQuieta(), undefined);
+    avanzarTiempo(150); // dentro de la ventana de 0.5s, cerca del pico
+    renderEngine.render(poseQuieta(), undefined);
+
+    expect(Math.abs(cabeza.rotation.z)).toBeGreaterThan(0);
+    expect(Math.abs(cabeza.rotation.z)).toBeLessThanOrEqual(0.11);
+
+    // Tras superar la duración completa (0.5s), debe volver a 0.
+    for (let i = 0; i < 10; i += 1) {
+      avanzarTiempo(80);
+      renderEngine.render(poseQuieta(), undefined);
+    }
+    expect(cabeza.rotation.z).toBeCloseTo(0, 5);
+  });
+
+  it('no lanza si no hay modelo de Codi registrado (toda la personalidad es no-op segura)', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    expect(() => renderEngine.render(poseQuieta(), undefined)).not.toThrow();
+    expect(() => renderEngine.render(poseCaminando(), undefined)).not.toThrow();
+  });
+
+  it('no modifica la geometría/proporciones base de Codi: la cadera de las patas y hombros de los brazos permanecen sin cambios tras muchos frames', () => {
+    const { renderEngine, modeloCodi } = crearRenderEngineConCodi();
+    const { patasTraseras, brazos } = modeloCodi.userData.partesAnimables;
+    const posicionesIniciales = [
+      { x: patasTraseras[0].position.x, y: patasTraseras[0].position.y, z: patasTraseras[0].position.z },
+      { x: brazos[0].position.x, y: brazos[0].position.y, z: brazos[0].position.z },
+    ];
+
+    for (let i = 0; i < 30; i += 1) {
+      avanzarTiempo(90);
+      renderEngine.render(i % 2 === 0 ? poseCaminando() : poseQuieta(), undefined);
+    }
+
+    expect(patasTraseras[0].position.x).toBeCloseTo(posicionesIniciales[0].x);
+    expect(patasTraseras[0].position.y).toBeCloseTo(posicionesIniciales[0].y);
+    expect(patasTraseras[0].position.z).toBeCloseTo(posicionesIniciales[0].z);
+    expect(brazos[0].position.x).toBeCloseTo(posicionesIniciales[1].x);
+    expect(brazos[0].position.y).toBeCloseTo(posicionesIniciales[1].y);
+    expect(brazos[0].position.z).toBeCloseTo(posicionesIniciales[1].z);
+  });
+});

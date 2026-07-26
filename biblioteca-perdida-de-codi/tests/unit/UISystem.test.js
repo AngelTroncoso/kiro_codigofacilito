@@ -155,4 +155,108 @@ describe('UISystem - unit tests', () => {
     expect(indicador.querySelector('.hud-skill-badge')).toBeNull();
     expect(indicador.querySelector('.hud-skill-empty')).not.toBeNull();
   });
+
+  describe('Visual Foundation (SPEC-02): identidad por Habilidad, animación de entrada y barra de progreso', () => {
+    it('cada badge de Habilidad conocida recibe su clase de acento (python/javascript/sql) además de la clase base', () => {
+      const uiSystem = new UISystem();
+      const progreso = new ProgressStore();
+      progreso.otorgarHabilidad('python');
+      progreso.otorgarHabilidad('javascript');
+      progreso.otorgarHabilidad('sql');
+      const contenedor = document.createElement('div');
+
+      uiSystem.renderizarEnDOM(contenedor, progreso, 1000);
+
+      const indicador = contenedor.querySelector('#ui-system-habilidades');
+      const badgePython = Array.from(indicador.querySelectorAll('.hud-skill-badge')).find(
+        (b) => b.textContent === 'python'
+      );
+      const badgeJs = Array.from(indicador.querySelectorAll('.hud-skill-badge')).find(
+        (b) => b.textContent === 'javascript'
+      );
+      const badgeSql = Array.from(indicador.querySelectorAll('.hud-skill-badge')).find(
+        (b) => b.textContent === 'sql'
+      );
+
+      expect(badgePython.classList.contains('hud-skill-badge--python')).toBe(true);
+      expect(badgeJs.classList.contains('hud-skill-badge--javascript')).toBe(true);
+      expect(badgeSql.classList.contains('hud-skill-badge--sql')).toBe(true);
+    });
+
+    it('un badge nuevo recibe la clase de animación de entrada solo en el frame en que aparece, no en renders posteriores', () => {
+      const uiSystem = new UISystem();
+      const progreso = new ProgressStore();
+      const contenedor = document.createElement('div');
+
+      progreso.otorgarHabilidad('python');
+      uiSystem.renderizarEnDOM(contenedor, progreso, 1000);
+      let badge = contenedor.querySelector('#ui-system-habilidades .hud-skill-badge');
+      expect(badge.classList.contains('hud-skill-badge--enter')).toBe(true);
+
+      // Segundo render del mismo frame lógico (el GameLoop llama
+      // renderizarEnDOM continuamente): el mismo badge ya no debe volver a
+      // marcarse como "recién aparecido".
+      uiSystem.renderizarEnDOM(contenedor, progreso, 1100);
+      badge = contenedor.querySelector('#ui-system-habilidades .hud-skill-badge');
+      expect(badge.classList.contains('hud-skill-badge--enter')).toBe(false);
+    });
+
+    it('un mensaje de error recibe la clase is-error; un mensaje normal no la recibe', () => {
+      const uiSystem = new UISystem();
+      const progreso = new ProgressStore();
+      const contenedor = document.createElement('div');
+
+      uiSystem.mostrarMensajeError('Algo salió mal', 1000);
+      uiSystem.renderizarEnDOM(contenedor, progreso, 1000);
+      expect(contenedor.querySelector('#ui-system-mensaje').classList.contains('is-error')).toBe(true);
+
+      uiSystem.mostrarMensaje('Todo bien', 3000, 2000);
+      uiSystem.renderizarEnDOM(contenedor, progreso, 2000);
+      expect(contenedor.querySelector('#ui-system-mensaje').classList.contains('is-error')).toBe(false);
+    });
+
+    it('un mensaje con patrón "N/total" (progreso de carga) agrega una barra de progreso con el ancho correspondiente', () => {
+      const uiSystem = new UISystem();
+      const progreso = new ProgressStore();
+      const contenedor = document.createElement('div');
+
+      uiSystem.mostrarMensaje('Cargando... 3/12', 60000, 1000);
+      uiSystem.renderizarEnDOM(contenedor, progreso, 1000);
+
+      const mensaje = contenedor.querySelector('#ui-system-mensaje');
+      // El texto visible no cambia (mismo contrato que main.js ya usa).
+      expect(mensaje.textContent).toContain('Cargando... 3/12');
+
+      const barra = mensaje.querySelector('.hud-progress-bar');
+      expect(barra).not.toBeNull();
+      const relleno = barra.querySelector('.hud-progress-bar__fill');
+      expect(relleno.style.width).toBe('25%');
+    });
+
+    it('un mensaje sin patrón "N/total" no tiene barra de progreso', () => {
+      const uiSystem = new UISystem();
+      const progreso = new ProgressStore();
+      const contenedor = document.createElement('div');
+
+      uiSystem.mostrarMensaje('¡Has absorbido Python!', 3000, 1000);
+      uiSystem.renderizarEnDOM(contenedor, progreso, 1000);
+
+      const mensaje = contenedor.querySelector('#ui-system-mensaje');
+      expect(mensaje.querySelector('.hud-progress-bar')).toBeNull();
+    });
+
+    it('la barra de progreso se remueve al pasar de un mensaje de carga a uno sin progreso', () => {
+      const uiSystem = new UISystem();
+      const progreso = new ProgressStore();
+      const contenedor = document.createElement('div');
+
+      uiSystem.mostrarMensaje('Cargando... 1/4', 60000, 1000);
+      uiSystem.renderizarEnDOM(contenedor, progreso, 1000);
+      expect(contenedor.querySelector('#ui-system-mensaje .hud-progress-bar')).not.toBeNull();
+
+      uiSystem.mostrarMensaje('¡Listo!', 3000, 2000);
+      uiSystem.renderizarEnDOM(contenedor, progreso, 2000);
+      expect(contenedor.querySelector('#ui-system-mensaje .hud-progress-bar')).toBeNull();
+    });
+  });
 });

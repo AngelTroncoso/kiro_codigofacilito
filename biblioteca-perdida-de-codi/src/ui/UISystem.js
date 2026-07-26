@@ -27,6 +27,29 @@ const DURACION_MENSAJE_ERROR_MS = 24 * 60 * 60 * 1000; // ~persistente: no se au
 
 const OVERLAY_ROOT_ID = 'ui-system-overlay';
 
+/**
+ * Patrón "N/total" usado hoy por `main.js` para reportar progreso de carga
+ * (p. ej. `"Cargando... 3/12"`, ver `AssetLoader.cargarTodos(onProgreso)`).
+ * Se usa ÚNICAMENTE para decidir, de forma puramente presentacional, si se
+ * añade la barra de progreso visual del Loader (docs/art-direction.md,
+ * sección 14) bajo el texto del mensaje — no cambia el texto en sí ni
+ * ningún contrato de `main.js`/`AssetLoader`.
+ */
+const PATRON_PROGRESO_CARGA = /(\d+)\s*\/\s*(\d+)/;
+
+/**
+ * Clase modificadora de `.hud-skill-badge` por Habilidad, para que cada una
+ * tenga su propio acento de color (docs/art-direction.md, sección 6). Si
+ * `habilidadId` no está en este catálogo (Habilidad futura no contemplada
+ * en la dirección artística todavía), el badge conserva el acento verde
+ * neutro por defecto ya definido en CSS.
+ */
+const CLASE_BADGE_POR_HABILIDAD = {
+  python: 'hud-skill-badge--python',
+  javascript: 'hud-skill-badge--javascript',
+  sql: 'hud-skill-badge--sql',
+};
+
 export class UISystem {
   constructor() {
     /**
@@ -35,6 +58,18 @@ export class UISystem {
      * @private
      */
     this._mensajeActivo = null;
+
+    /**
+     * Snapshot de los ids de Habilidad ya renderizados como badge en la
+     * llamada anterior a `renderizarEnDOM`, usado ÚNICAMENTE para decidir
+     * qué badge es "nuevo en este frame" y debe reproducir la animación de
+     * entrada (`hud-skill-badge--enter`, docs/art-direction.md sección 21).
+     * Es estado puramente de presentación (no afecta `ProgressStore` ni
+     * ninguna lógica de juego).
+     * @type {Set<string>}
+     * @private
+     */
+    this._habilidadesYaAnimadas = new Set();
   }
 
   /**
@@ -232,7 +267,20 @@ export class UISystem {
     if (vista.habilidadesObtenidas.size > 0) {
       for (const habilidadId of vista.habilidadesObtenidas) {
         const badge = overlay.ownerDocument.createElement('span');
-        badge.className = 'hud-skill-badge';
+        // Identidad visual por Habilidad (docs/art-direction.md sección 6):
+        // cada Habilidad conocida obtiene su propia clase de acento de
+        // color, además de la clase base compartida.
+        const claseAcento = CLASE_BADGE_POR_HABILIDAD[habilidadId];
+        badge.className = claseAcento ? `hud-skill-badge ${claseAcento}` : 'hud-skill-badge';
+        // Animación de entrada ("pop", art-direction sección 21): solo se
+        // aplica la primera vez que este id de Habilidad aparece en el
+        // indicador; en renders posteriores del mismo frame/sesión ya no
+        // se re-anima (evita reiniciar la animación en cada frame del
+        // GameLoop, que llama renderizarEnDOM continuamente).
+        if (!this._habilidadesYaAnimadas.has(habilidadId)) {
+          badge.className += ' hud-skill-badge--enter';
+          this._habilidadesYaAnimadas.add(habilidadId);
+        }
         badge.textContent = habilidadId;
         indicador.appendChild(badge);
       }
@@ -250,9 +298,60 @@ export class UISystem {
       mensaje.style.borderLeft = vista.mensajeActivo.esError
         ? `4px solid var(--hud-accent-danger, #f87171)`
         : `4px solid var(--hud-accent-cyan, #38bdf8)`;
+      mensaje.classList.toggle('is-error', Boolean(vista.mensajeActivo.esError));
+
+      // Barra de progreso del Loader (docs/art-direction.md sección 14):
+      // se añade/actualiza únicamente cuando el texto del mensaje sigue el
+      // patrón "N/total" que ya usa `main.js` al reportar progreso de
+      // carga (ver AssetLoader.cargarTodos/onProgreso) — es una lectura
+      // puramente presentacional del texto ya existente, no un nuevo
+      // contrato de datos.
+      this._actualizarBarraProgreso(mensaje, vista.mensajeActivo.texto);
     } else {
       mensaje.textContent = '';
       mensaje.style.display = 'none';
+      mensaje.classList.remove('is-error');
     }
+  }
+
+  /**
+   * Crea o actualiza la barra de progreso visual (`.hud-progress-bar`)
+   * dentro de `mensajeEl` si `texto` contiene el patrón "N/total"
+   * (`PATRON_PROGRESO_CARGA`), o la remueve si no lo contiene. Es un
+   * detalle puramente visual (docs/art-direction.md, sección 14, "Diseño
+   * del sistema de carga"): no lee ni depende de ningún estado de
+   * `AssetLoader`/`ProgressStore`, solo del texto que `main.js` ya pasa a
+   * `mostrarMensaje` sin cambios.
+   *
+   * @private
+   * @param {HTMLElement} mensajeEl
+   * @param {string} texto
+   * @returns {void}
+   */
+  _actualizarBarraProgreso(mensajeEl, texto) {
+    const coincidencia = texto.match(PATRON_PROGRESO_CARGA);
+    let barra = mensajeEl.querySelector('.hud-progress-bar');
+
+    if (!coincidencia) {
+      barra?.remove();
+      return;
+    }
+
+    const cargados = Number(coincidencia[1]);
+    const total = Number(coincidencia[2]);
+    const porcentaje = total > 0 ? Math.min(100, Math.max(0, (cargados / total) * 100)) : 0;
+
+    if (!barra) {
+      const doc = mensajeEl.ownerDocument;
+      barra = doc.createElement('div');
+      barra.className = 'hud-progress-bar';
+      const relleno = doc.createElement('div');
+      relleno.className = 'hud-progress-bar__fill';
+      barra.appendChild(relleno);
+      mensajeEl.appendChild(barra);
+    }
+
+    const relleno = barra.querySelector('.hud-progress-bar__fill');
+    relleno.style.width = `${porcentaje}%`;
   }
 }

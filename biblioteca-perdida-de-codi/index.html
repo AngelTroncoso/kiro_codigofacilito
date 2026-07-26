@@ -5,22 +5,115 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Codi y la Biblioteca Perdida del Código</title>
     <style>
+      /* ============================================================
+       * DESIGN TOKENS — Visual Foundation (SPEC-02)
+       * Fuente de verdad: docs/art-direction.md (secciones 5, 6, 8, 15-21).
+       * Ningún color/tamaño/duración nuevo debe hardcodearse fuera de
+       * este bloque: toda regla posterior consume estas variables.
+       * ============================================================ */
       :root {
-        --hud-bg: rgba(13, 17, 23, 0.75);
-        --hud-border: rgba(56, 189, 248, 0.25);
-        --hud-accent-cyan: #38bdf8;
-        --hud-accent-green: #10b981;
-        --hud-accent-danger: #f87171;
-        --hud-text: #e6edf3;
-        --hud-font: system-ui, -apple-system, 'Inter', 'Fira Code', 'Segoe UI', sans-serif;
-        --hud-font-mono: 'Fira Code', 'Courier New', monospace;
+        /* --- Color: base / atmósfera (docs/art-direction.md 5.1) --- */
+        --color-bg-deep: #0d1b2a;
+        --color-stone-base: #2b2438;
+        --color-stone-light: #4a4160;
+        --color-fog: #16233a;
+
+        /* --- Color: acentos por Habilidad + acento neutro (5.2, 6) --- */
+        --color-accent-cyan: #38bdf8; /* JavaScript */
+        --color-accent-amber: #fbbf24; /* Python */
+        --color-accent-green: #10b981; /* progreso genérico, sin Habilidad específica */
+        --color-accent-violet: #a855f7; /* SQL / misterio */
+
+        /* --- Color: superficie de cristal / glassmorphism (5.3) --- */
+        --color-glass-bg: rgba(13, 17, 23, 0.72);
+        --color-glass-border: rgba(56, 189, 248, 0.28);
+        --color-glass-border-warm: rgba(251, 191, 36, 0.28);
+        --color-text-primary: #e6edf3;
+        --color-text-muted: rgba(230, 237, 243, 0.6);
+        --color-danger: #f87171;
+
+        /* --- Color: Codi, identidad oficial inalterable (5.4, sección 7) --- */
+        --color-codi-verde: #1fce6b;
+        --color-codi-vientre: #fbcd16;
+
+        /* --- Alias retrocompatibles (referenciados inline por UISystem.js) ---
+         * No eliminar: UISystem.js usa var(--hud-accent-cyan, ...) /
+         * var(--hud-accent-danger, ...) como color de borde del mensaje.
+         */
+        --hud-bg: var(--color-glass-bg);
+        --hud-border: var(--color-glass-border);
+        --hud-accent-cyan: var(--color-accent-cyan);
+        --hud-accent-green: var(--color-accent-green);
+        --hud-accent-danger: var(--color-danger);
+        --hud-text: var(--color-text-primary);
+
+        /* --- Tipografía (docs/art-direction.md sección 8) --- */
+        --font-family-base: system-ui, -apple-system, 'Inter', 'Segoe UI', sans-serif;
+        --font-family-mono: 'Fira Code', 'Courier New', monospace;
+        --hud-font: var(--font-family-base);
+        --hud-font-mono: var(--font-family-mono);
+
+        --font-size-title: 12px;
+        --font-size-subtitle: 13px;
+        --font-size-body: 14px;
+        --font-size-message: 15px;
+        --font-size-action: 13px;
+        --font-size-badge: 12px;
+        --font-size-button: 14px;
+
+        --font-weight-regular: 400;
+        --font-weight-medium: 500;
+        --font-weight-semibold: 600;
+
+        --letter-spacing-title: 0.06em;
+        --line-height-tight: 1.3;
+        --line-height-base: 1.5;
+        --line-height-relaxed: 1.7;
+
+        /* --- Espaciado --- */
+        --space-xs: 4px;
+        --space-sm: 8px;
+        --space-md: 12px;
+        --space-lg: 16px;
+        --space-xl: 24px;
+
+        /* --- Radios --- */
+        --radius-sm: 6px;
+        --radius-md: 12px;
+        --radius-pill: 999px;
+
+        /* --- Sombras / niveles de elevación --- */
+        --shadow-elevation-1: 0 8px 32px rgba(0, 0, 0, 0.45), 0 0 18px rgba(56, 189, 248, 0.08);
+        --shadow-glow-cyan: 0 0 8px rgba(56, 189, 248, 0.5);
+        --shadow-glow-cyan-soft: 0 0 6px rgba(56, 189, 248, 0.25);
+        --shadow-glow-green: 0 0 6px rgba(16, 185, 129, 0.4);
+        --shadow-glow-amber: 0 0 6px rgba(251, 191, 36, 0.4);
+        --shadow-glow-violet: 0 0 6px rgba(168, 85, 247, 0.4);
+
+        /* --- Transparencia / desenfoque --- */
+        --opacity-disabled: 0.4;
+        --blur-glass: 12px;
+
+        /* --- Duraciones de animación --- */
+        --duration-fast: 120ms;
+        --duration-base: 180ms;
+        --duration-slow: 250ms;
+
+        /* --- Easing --- */
+        --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+        --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+        --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+        /* --- Z-index --- */
+        --z-hud: 1000;
+        --z-overlay: 1100;
       }
 
       html, body {
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background: #070b19;
+        background: var(--color-bg-deep);
         height: 100%;
       }
 
@@ -30,22 +123,60 @@
         height: 100vh;
       }
 
-      /* --- HUD / overlay: estética "Cyber-Glassmorphism" --- */
+      /* ============================================================
+       * TIPOGRAFÍA — jerarquía reutilizable (título/subtítulo/texto/botón)
+       * Disponible para HUD, Loader y futuros menús/diálogos.
+       * ============================================================ */
+      .text-title {
+        font-family: var(--font-family-base);
+        font-weight: var(--font-weight-semibold);
+        font-size: var(--font-size-title);
+        text-transform: uppercase;
+        letter-spacing: var(--letter-spacing-title);
+        margin: 0;
+      }
+
+      .text-subtitle {
+        font-family: var(--font-family-base);
+        font-weight: var(--font-weight-medium);
+        font-size: var(--font-size-subtitle);
+        color: var(--color-text-muted);
+        margin: 0;
+      }
+
+      .text-body {
+        font-family: var(--font-family-base);
+        font-weight: var(--font-weight-regular);
+        font-size: var(--font-size-body);
+        line-height: var(--line-height-base);
+        margin: 0;
+      }
+
+      .text-button {
+        font-family: var(--font-family-base);
+        font-weight: var(--font-weight-medium);
+        font-size: var(--font-size-button);
+      }
+
+      /* ============================================================
+       * HUD / overlay — estética "Archivo Vivo" (Cyber-Glassmorphism)
+       * Estructura e IDs sin cambios (ver src/ui/UISystem.js).
+       * ============================================================ */
 
       .hud-overlay {
-        font-family: var(--hud-font);
+        font-family: var(--font-family-base);
       }
 
       .hud-card {
-        background: var(--hud-bg);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid var(--hud-border);
-        border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), 0 0 18px rgba(56, 189, 248, 0.08);
-        color: var(--hud-text);
-        font-family: var(--hud-font);
-        padding: 10px 16px;
+        background: var(--color-glass-bg);
+        backdrop-filter: blur(var(--blur-glass));
+        -webkit-backdrop-filter: blur(var(--blur-glass));
+        border: 1px solid var(--color-glass-border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-elevation-1);
+        color: var(--color-text-primary);
+        font-family: var(--font-family-base);
+        padding: var(--space-md) var(--space-lg);
       }
 
       .hud-card--skills {
@@ -55,40 +186,99 @@
       .hud-card--message {
         max-width: min(90vw, 480px);
         text-align: center;
-        font-size: 14px;
+        font-size: var(--font-size-message);
+        position: relative;
+        /* Entrada suave ("flota hacia la existencia", art-direction sección
+         * 10/21). Se dispara cada vez que el navegador conmuta
+         * display:none -> block, es decir, en cada nuevo mensaje mostrado. */
+        animation: hud-card-enter var(--duration-slow) var(--ease-out);
+      }
+
+      /* Icono de estado, generado vía CSS (no forma parte de
+       * `textContent`, por lo que no interfiere con las comprobaciones de
+       * texto exacto de los tests existentes). `.is-error` se aplica desde
+       * UISystem.js según `vista.mensajeActivo.esError` (dato ya expuesto
+       * por la lógica existente, sin cambios de comportamiento). */
+      .hud-card--message.is-error::before {
+        content: '⚠';
+        margin-right: var(--space-sm);
+      }
+
+      /* Barra de progreso del Loader (art-direction sección 14): solo se
+       * añade cuando UISystem detecta el patrón "N/total" ya presente en
+       * el texto de carga que main.js envía (p. ej. "Cargando... 3/12"),
+       * de forma puramente presentacional — no depende de ningún cambio en
+       * main.js/AssetLoader ni en su lógica. */
+      .hud-progress-bar {
+        margin-top: var(--space-sm);
+        height: 3px;
+        border-radius: var(--radius-pill);
+        background: rgba(230, 237, 243, 0.15);
+        overflow: hidden;
+      }
+
+      .hud-progress-bar__fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--color-accent-cyan), var(--color-accent-amber));
+        border-radius: var(--radius-pill);
+        transition: width var(--duration-base) var(--ease-standard);
       }
 
       .hud-card--controls {
-        font-size: 13px;
-        line-height: 1.7;
+        font-size: var(--font-size-action);
+        line-height: var(--line-height-relaxed);
       }
 
       .hud-title {
-        color: var(--hud-accent-cyan);
-        font-weight: 600;
-        font-size: 12px;
+        color: var(--color-accent-cyan);
+        font-weight: var(--font-weight-semibold);
+        font-size: var(--font-size-title);
         text-transform: uppercase;
-        letter-spacing: 0.06em;
-        margin-bottom: 8px;
-        text-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+        letter-spacing: var(--letter-spacing-title);
+        margin-bottom: var(--space-sm);
+        text-shadow: var(--shadow-glow-cyan);
       }
 
+      /* Badge de habilidad: color neutro (verde) por defecto; cada
+       * Habilidad obtiene su propio acento (art-direction sección 6) vía
+       * una clase modificadora aplicada en UISystem.js según el id. */
       .hud-skill-badge {
         display: inline-block;
         background: rgba(16, 185, 129, 0.12);
         border: 1px solid rgba(16, 185, 129, 0.5);
-        color: var(--hud-accent-green);
-        border-radius: 999px;
-        padding: 2px 10px;
-        margin: 2px 4px 2px 0;
-        font-size: 12px;
-        font-weight: 500;
-        text-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+        color: var(--color-accent-green);
+        border-radius: var(--radius-pill);
+        padding: 2px var(--space-sm);
+        margin: 2px var(--space-xs) 2px 0;
+        font-size: var(--font-size-badge);
+        font-weight: var(--font-weight-medium);
+        text-shadow: var(--shadow-glow-green);
+      }
+
+      .hud-skill-badge--python {
+        background: rgba(251, 191, 36, 0.12);
+        border-color: rgba(251, 191, 36, 0.5);
+        color: var(--color-accent-amber);
+        text-shadow: var(--shadow-glow-amber);
+      }
+
+      .hud-skill-badge--javascript {
+        background: rgba(56, 189, 248, 0.12);
+        border-color: rgba(56, 189, 248, 0.5);
+        color: var(--color-accent-cyan);
+        text-shadow: var(--shadow-glow-cyan-soft);
+      }
+
+      .hud-skill-badge--sql {
+        background: rgba(168, 85, 247, 0.12);
+        border-color: rgba(168, 85, 247, 0.5);
+        color: var(--color-accent-violet);
+        text-shadow: var(--shadow-glow-violet);
       }
 
       .hud-skill-empty {
-        color: rgba(230, 237, 243, 0.6);
-        font-size: 13px;
+        color: var(--color-text-muted);
+        font-size: var(--font-size-subtitle);
         font-style: italic;
       }
 
@@ -101,8 +291,8 @@
       .hud-controls-list li {
         display: flex;
         align-items: center;
-        gap: 6px;
-        margin-bottom: 6px;
+        gap: var(--space-xs);
+        margin-bottom: var(--space-sm);
       }
 
       .hud-controls-list li:last-child {
@@ -113,16 +303,106 @@
         display: inline-block;
         background: rgba(8, 15, 26, 0.85);
         border: 1px solid rgba(56, 189, 248, 0.45);
-        border-radius: 6px;
+        border-radius: var(--radius-sm);
         padding: 1px 7px;
-        font-family: var(--hud-font-mono);
+        font-family: var(--font-family-mono);
         font-size: 11px;
-        color: var(--hud-accent-cyan);
-        box-shadow: 0 0 6px rgba(56, 189, 248, 0.25);
+        color: var(--color-accent-cyan);
+        box-shadow: var(--shadow-glow-cyan-soft);
       }
 
       .hud-control-accion {
-        color: var(--hud-text);
+        color: var(--color-text-primary);
+        font-family: var(--font-family-base);
+        font-size: var(--font-size-action);
+      }
+
+      /* ============================================================
+       * BOTONES — componente único reutilizable (infraestructura visual,
+       * sin uso en pantalla todavía: se activará al aprobarse una
+       * Specification de menú/diálogo). Mismo lenguaje visual que .hud-card.
+       * ============================================================ */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-sm);
+        padding: var(--space-sm) var(--space-lg);
+        background: var(--color-glass-bg);
+        backdrop-filter: blur(var(--blur-glass));
+        -webkit-backdrop-filter: blur(var(--blur-glass));
+        border: 1px solid var(--color-glass-border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-elevation-1);
+        color: var(--color-text-primary);
+        font-family: var(--font-family-base);
+        font-size: var(--font-size-button);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+        transition:
+          box-shadow var(--duration-base) var(--ease-standard),
+          border-color var(--duration-base) var(--ease-standard),
+          opacity var(--duration-base) var(--ease-standard);
+      }
+
+      .btn:hover {
+        border-color: rgba(56, 189, 248, 0.5);
+        box-shadow: var(--shadow-elevation-1), 0 0 0 1px rgba(56, 189, 248, 0.2);
+      }
+
+      .btn:focus-visible {
+        outline: 2px solid var(--color-accent-cyan);
+        outline-offset: 2px;
+      }
+
+      .btn:active {
+        box-shadow: var(--shadow-elevation-1), 0 0 0 1px rgba(56, 189, 248, 0.35);
+      }
+
+      .btn:disabled,
+      .btn[aria-disabled='true'] {
+        opacity: var(--opacity-disabled);
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+
+      /* ============================================================
+       * ANIMACIONES UI
+       * ============================================================ */
+      @keyframes hud-card-enter {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 8px);
+        }
+        to {
+          opacity: 1;
+          transform: translate(-50%, 0);
+        }
+      }
+
+      /* Badge nuevo en el Panel de Habilidades: "pop" de escala breve
+       * (art-direction sección 21), aplicado por UISystem.js solo al badge
+       * recién agregado en el frame en que aparece. */
+      @keyframes hud-badge-pop {
+        from {
+          transform: scale(0.8);
+        }
+        to {
+          transform: scale(1);
+        }
+      }
+
+      .hud-skill-badge--enter {
+        animation: hud-badge-pop var(--duration-base) var(--ease-out);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .hud-card--message,
+        .hud-skill-badge--enter,
+        .btn {
+          animation: none !important;
+          transition: none !important;
+        }
       }
     </style>
   </head>

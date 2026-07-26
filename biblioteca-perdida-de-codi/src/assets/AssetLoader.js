@@ -253,15 +253,21 @@ export class AssetLoader {
 
     switch (categoria) {
       case 'entorno':
-        // Plataforma metalizada oscura tipo "servidor/espacio" (estética
-        // cyberpunk/sci-fi de la Biblioteca del Código): alto roughness y
-        // metalness para un acabado industrial, sin emissive (superficie
-        // pasiva, no un módulo activo).
+        // Plataforma de piedra antigua (SPEC-03: World Atmosphere &
+        // Rendering, docs/art-direction.md secciones 1 y 17): alto
+        // roughness y metalness moderado para un acabado mineral, no
+        // pulido/futurista, con un `emissive` muy sutil y frío que sugiere
+        // "conocimiento vivo" latente bajo la superficie (bioluminiscencia
+        // apenas perceptible, no un módulo activo como los mecanismos) —
+        // color/roughness/metalness base sin cambios respecto a la
+        // implementación previa (AssetLoader.fallback.test.js los fija).
         geometria = new THREE.BoxGeometry(10, 0.5, 10);
         material = new THREE.MeshStandardMaterial({
           color: 0x1e293b,
           roughness: 0.85,
           metalness: 0.6,
+          emissive: 0x16233a,
+          emissiveIntensity: 0.15,
         });
         break;
       case 'mecanismo':
@@ -352,7 +358,14 @@ export class AssetLoader {
     const materialVerdeOscuro = new THREE.MeshStandardMaterial({ color: VERDE_OSCURO });
     const materialVientre = new THREE.MeshStandardMaterial({ color: AMARILLO_VIENTRE });
     const materialEscama = new THREE.MeshStandardMaterial({ color: AMARILLO_ESCAMA });
-    const materialBlanco = new THREE.MeshStandardMaterial({ color: BLANCO });
+    // Esclerótica blanca BRILLANTE: además del color blanco puro, se le da
+    // un ligero `emissive` blanco para que los ojos resalten visualmente
+    // sobre el verde del resto del cuerpo (ajuste de Ojos y Mirada).
+    const materialBlanco = new THREE.MeshStandardMaterial({
+      color: BLANCO,
+      emissive: new THREE.Color(BLANCO),
+      emissiveIntensity: 0.15,
+    });
     const materialNegro = new THREE.MeshStandardMaterial({ color: NEGRO });
 
     const grupo = new THREE.Group();
@@ -366,19 +379,26 @@ export class AssetLoader {
     grupo.add(torso);
 
     // Vientre: placa amarilla cálida, ligeramente curvada, superpuesta al
-    // frente/abajo del torso.
-    const vientre = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 12), materialVientre);
-    vientre.scale.set(0.85, 0.6, 0.62);
-    vientre.position.set(0, 0.42, 0.32);
+    // frente/abajo del torso. Escalado y desplazado más hacia el
+    // frente/abajo (mayor que la versión anterior) para que sea claramente
+    // visible desde la cámara en vez de quedar semi-oculto detrás del
+    // torso verde.
+    const vientre = new THREE.Mesh(new THREE.SphereGeometry(0.36, 16, 12), materialVientre);
+    vientre.scale.set(0.95, 0.68, 0.75);
+    vientre.position.set(0, 0.38, 0.4);
     grupo.add(vientre);
 
-    // Líneas/textura de escamas horizontales sobre el vientre: anillos
-    // delgados que lo envuelven a distintas alturas.
-    const alturasEscamas = [0.26, 0.36, 0.46];
+    // Líneas de escamas horizontales sobre el vientre: bandas planas y
+    // delgadas (cajas achatadas, no anillos/toros) que lo envuelven a
+    // distintas alturas. Se usan `BoxGeometry` en vez de `TorusGeometry`
+    // deliberadamente: un torus de pocos segmentos, visto de perfil/desde
+    // abajo, se leía visualmente como una espiral/resorte flotando bajo el
+    // cuerpo (defecto reportado y eliminado); una banda plana da el mismo
+    // efecto de "línea de escama" sin ese artefacto de lectura 3D.
+    const alturasEscamas = [0.26, 0.34, 0.42];
     for (const y of alturasEscamas) {
-      const lineaEscama = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.015, 6, 16), materialEscama);
-      lineaEscama.rotation.x = Math.PI / 2;
-      lineaEscama.position.set(0, y, 0.3);
+      const lineaEscama = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, 0.05), materialEscama);
+      lineaEscama.position.set(0, y, 0.62);
       grupo.add(lineaEscama);
     }
 
@@ -411,16 +431,30 @@ export class AssetLoader {
       grupo.add(diente);
     }
 
-    // Ojos grandes y expresivos, orientados al frente, con pupila negra anidada.
+    // Ojos grandes y expresivos, con esclerótica blanca brillante y
+    // pupila negra anidada mirando estrictamente hacia el frente (eje +Z
+    // del ojo, sin componente vertical): la pupila se posiciona a la misma
+    // altura Y que el centro del ojo (y=0 relativo), solo desplazada en Z,
+    // para que la mirada de Codi apunte al frente y no hacia arriba.
+    //
+    // Las referencias a cada ojo y su pupila se guardan en `ojos`/`pupilas`
+    // (mismo patrón que `patasTraseras`/`brazos`/`cola` más abajo) para que
+    // `RenderEngine` pueda animarlas (parpadeo, micro-movimientos de
+    // mirada) sin que este método necesite saber nada sobre esa animación
+    // — geometría, materiales y posiciones iniciales quedan sin cambios.
+    const ojos = [];
+    const pupilas = [];
     const offsetsOjos = [-0.15, 0.15];
     for (const offsetX of offsetsOjos) {
       const ojo = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 10), materialBlanco);
       ojo.position.set(offsetX, 1.18, 0.5);
       grupo.add(ojo);
+      ojos.push(ojo);
 
       const pupila = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), materialNegro);
-      pupila.position.set(0, 0, 0.08);
+      pupila.position.set(0, 0, 0.095);
       ojo.add(pupila);
+      pupilas.push(pupila);
     }
 
     // --- Extremidades ---
@@ -429,7 +463,10 @@ export class AssetLoader {
     // cadera) para poder rotarlas de forma creíble en el ciclo de caminata,
     // con pequeñas garras en la punta.
     const patasTraseras = [];
-    const offsetsPatasTraseras = [-0.24, 0.24];
+    // Offsets ligeramente mayores que la versión anterior (-0.24/0.24) para
+    // una postura más firme y natural, con las patas apoyadas un poco más
+    // hacia afuera del eje central del cuerpo.
+    const offsetsPatasTraseras = [-0.3, 0.3];
     for (const x of offsetsPatasTraseras) {
       const pivotPata = new THREE.Group();
       pivotPata.position.set(x, 0.34, -0.12);
@@ -495,7 +532,7 @@ export class AssetLoader {
       pivotCola.add(crestaCola);
     }
 
-    grupo.userData.partesAnimables = { patasTraseras, brazos, cola: pivotCola };
+    grupo.userData.partesAnimables = { patasTraseras, brazos, cola: pivotCola, ojos, pupilas, cabeza };
 
     return grupo;
   }
