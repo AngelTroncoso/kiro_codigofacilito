@@ -384,6 +384,8 @@ export async function iniciarJuego(dependencias = {}) {
       // Copias mutables: nunca se mutan MECANISMOS/LIBROS de zones.data.js directamente.
       librosActivos: librosDeclarativos.map((libro) => ({ ...libro })),
       mecanismosActivos: mecanismosDeclarativos.map((mecanismo) => ({ ...mecanismo })),
+      // Bandera de pausa del juego (para mostrar pantalla de Victoria)
+      juegoPausado: false,
     };
 
     // Posicionamiento visual de instancias reales de Mecanismos y Libros:
@@ -443,11 +445,20 @@ export async function iniciarJuego(dependencias = {}) {
      * @returns {void}
      */
     function updateFn(deltaTime, _elapsedTime) {
+      // --- Pausa del juego cuando se muestra pantalla de Victoria ---
+      if (estado.juegoPausado) {
+        // Actualizar solo la interfaz para mantener el modal visible
+        uiSystem.renderizarEnDOM(contenedorOverlay, progreso, Date.now());
+        return;
+      }
+
       const inputState = inputProvider.leerEstado();
 
       // --- Movimiento ---
       const mundoMovimiento = construirMundoMovimiento(zonas, abilitySystem, progreso);
-      estado.codiPose = movementSystem.actualizar(inputState, deltaTime, estado.codiPose, mundoMovimiento);
+      // Aplicar multiplicador de velocidad del Demo Mode (K/R/M atajos)
+      const deltaTimeAjustado = deltaTime * velocidadMultiplicador;
+      estado.codiPose = movementSystem.actualizar(inputState, deltaTimeAjustado, estado.codiPose, mundoMovimiento);
 
       // --- Cámara ---
       const mundoCamara = construirMundoCamara();
@@ -467,6 +478,8 @@ export async function iniciarJuego(dependencias = {}) {
           undefined,
           Date.now()
         );
+        // H03: Reproducir sonido de recolección al obtener habilidad
+        uiSystem.reproducirSonidoRecoleccion();
       }
 
       // --- Interacción: Mecanismos cercanos o avance del Desafío Final ---
@@ -509,6 +522,10 @@ export async function iniciarJuego(dependencias = {}) {
             const resultadoInteraccion = abilitySystem.interactuar(mecanismoCercano, progreso);
             if (resultadoInteraccion.mensaje) {
               uiSystem.mostrarMensaje(resultadoInteraccion.mensaje, undefined, Date.now());
+              // H03: Reproducir sonido de click al interactuar con mecanismo
+              if (resultadoInteraccion.mecanismoResuelto) {
+                uiSystem.reproducirSonidoClick();
+              }
             }
           }
         }
@@ -525,6 +542,13 @@ export async function iniciarJuego(dependencias = {}) {
 
       // --- Interfaz: mantener el overlay HTML/CSS actualizado ---
       uiSystem.renderizarEnDOM(contenedorOverlay, progreso, Date.now());
+
+      // --- Detectar Victoria (Desafío Final completado) ---
+      if (progreso.desafioCompletado() && !estado.juegoPausado) {
+        estado.juegoPausado = true;
+        // H03: Reproducir sonido de Victoria
+        uiSystem.reproducirSonidoVictoria();
+      }
     }
 
     // --- 8. GameLoop, con manejo de errores de nivel de frame ---
@@ -539,6 +563,128 @@ export async function iniciarJuego(dependencias = {}) {
 
     // --- 9. Arrancar el bucle de juego ---
     gameLoop.start();
+
+    // --- Event listener para botón de reinicio (solo si se mostró Victoria) ---
+    const btnReiniciar = contenedorOverlay.querySelector('#ui-system-btn-reiniciar');
+    if (btnReiniciar) {
+      btnReiniciar.addEventListener('click', () => {
+        // H03: Reproducir sonido de click
+        uiSystem.reproducirSonidoClick();
+        
+        // Reiniciar progreso
+        progreso.reset();
+        
+        // Restaurar estado del juego
+        estado.juegoPausado = false;
+        estado.pasoFinalIndice = 0;
+        
+        // Restaurar mecanismos a su estado original
+        estado.mecanismosActivos.forEach((mecanismo, index) => {
+          mecanismo.estado = mecanismosDeclarativos[index].estado;
+        });
+        
+        // Restaurar libros a su estado original (no absorbidos)
+        estado.librosActivos.forEach((libro, index) => {
+          libro.absorbido = librosDeclarativos[index].absorbido;
+        });
+        
+        // Ocultar modal de Victoria
+        uiSystem.renderizarEnDOM(contenedorOverlay, progreso, Date.now());
+        
+        // Mostrar mensaje de reinicio
+        uiSystem.mostrarMensaje('¡Juego reiniciado! Explora la Isla de nuevo.', 4000, Date.now());
+      });
+    }
+
+    // --- H06: Jury Demo Mode (Dev Keys para presentación en vivo) ---
+    // Atajos de teclado para facilitar la presentación del juego ante el jurado
+    // eslint-disable-next-line no-console
+    console.log('[Demo Mode] Atajos activos: K=Victoria instantánea | R=Reiniciar | M=Toggle velocidad x2');
+    
+    let velocidadMultiplicador = 1.0;
+    
+    doc.addEventListener('keydown', (event) => {
+      // Ignorar si hay un input/textarea activo (evita conflictos con formularios)
+      const elementoActivo = doc.activeElement;
+      if (elementoActivo && (elementoActivo.tagName === 'INPUT' || elementoActivo.tagName === 'TEXTAREA')) {
+        return;
+      }
+      
+      // K: Forzar Victoria instantánea (completa todos los fragmentos)
+      if (event.code === 'KeyK' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        
+        // Completar todas las habilidades
+        ['python', 'javascript', 'sql'].forEach(habilidadId => {
+          if (!progreso.tieneHabilidad(habilidadId)) {
+            progreso.otorgarHabilidad(habilidadId);
+          }
+        });
+        
+        // Completar todos los mecanismos
+        estado.mecanismosActivos.forEach(mecanismo => {
+          if (mecanismo.estado === 'resuelto' && !progreso.tieneMecanismoResuelto(mecanismo.id)) {
+            progreso.marcarMecanismoResuelto(mecanismo.id);
+          }
+        });
+        
+        // Completar desafío final
+        if (!progreso.desafioCompletado()) {
+          progreso.marcarDesafioCompletado();
+        }
+        
+        // eslint-disable-next-line no-console
+        console.log('[Demo Mode] Victoria forzada - Progreso al 100%');
+      }
+      
+      // R: Reiniciar demo instantáneamente
+      if (event.code === 'KeyR' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        
+        // Reiniciar progreso
+        progreso.reset();
+        
+        // Restaurar estado del juego
+        estado.juegoPausado = false;
+        estado.pasoFinalIndice = 0;
+        velocidadMultiplicador = 1.0;
+        
+        // Restaurar mecanismos a su estado original
+        estado.mecanismosActivos.forEach((mecanismo, index) => {
+          mecanismo.estado = mecanismosDeclarativos[index].estado;
+        });
+        
+        // Restaurar libros a su estado original (no absorbidos)
+        estado.librosActivos.forEach((libro, index) => {
+          libro.absorbido = librosDeclarativos[index].absorbido;
+        });
+        
+        // Reiniciar posición de Codi
+        const posicionInicial = calcularPosicionInicioCodi(primeraZona);
+        estado.codiPose = {
+          position: posicionInicial,
+          rotationY: 0,
+          velocity: { x: 0, y: 0, z: 0 },
+          animState: 'idle',
+          lastSafePosition: { ...posicionInicial },
+        };
+        
+        uiSystem.mostrarMensaje('⚡ Demo reiniciada', 2000, Date.now());
+        // eslint-disable-next-line no-console
+        console.log('[Demo Mode] Demo reiniciada completamente');
+      }
+      
+      // M: Toggle velocidad de movimiento x2 (para navegar rápido el mapa)
+      if (event.code === 'KeyM' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        
+        velocidadMultiplicador = velocidadMultiplicador === 1.0 ? 2.0 : 1.0;
+        const mensaje = velocidadMultiplicador === 2.0 ? '⚡ Velocidad x2 activada' : '⚡ Velocidad normal';
+        uiSystem.mostrarMensaje(mensaje, 2000, Date.now());
+        // eslint-disable-next-line no-console
+        console.log(`[Demo Mode] Velocidad: x${velocidadMultiplicador}`);
+      }
+    });
 
     return { motivo: 'iniciado', uiSystem, progreso, renderEngine, gameLoop };
   } catch (error) {
@@ -560,12 +706,13 @@ export async function iniciarJuego(dependencias = {}) {
   }
 }
 
-// Arranque real en el navegador: se invoca con los valores por defecto
-// (document/window/clases reales) al cargar este módulo. No se hace nada
-// con la Promise devuelta más allá de registrar un error de última
-// instancia, ya que `iniciarJuego` ya maneja internamente todos los casos
-// de error esperados.
+// Arranque automático del juego al cargar el módulo en el navegador.
+// La función `iniciarJuego` se invoca sin argumentos, usando todos los
+// valores por defecto (document global, canvas "app-canvas", etc.).
 iniciarJuego().catch((error) => {
   // eslint-disable-next-line no-console
-  console.error('[main.js] Fallo irrecuperable al iniciar el juego:', error);
+  console.error('[main.js] Error fatal durante arranque del juego:', error);
 });
+
+// También exportar como default para compatibilidad con tests y futuros menús
+export default iniciarJuego;

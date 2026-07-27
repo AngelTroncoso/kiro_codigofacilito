@@ -367,6 +367,70 @@
       }
 
       /* ============================================================
+       * MODAL DE VICTORIA
+       * ============================================================ */
+      .hud-overlay-victory {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        z-index: 1200;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: auto;
+      }
+
+      .hud-card-victory {
+        background: var(--color-glass-bg);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 2px solid var(--color-accent-green);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-elevation-1), 0 0 30px rgba(16, 185, 129, 0.4);
+        color: var(--color-text-primary);
+        padding: var(--space-xl);
+        text-align: center;
+        max-width: min(90vw, 500px);
+        animation: hud-modal-enter var(--duration-slow) var(--ease-out);
+      }
+
+      .hud-title-victory {
+        color: var(--color-accent-green);
+        font-weight: var(--font-weight-semibold);
+        font-size: 28px;
+        text-transform: uppercase;
+        letter-spacing: var(--letter-spacing-title);
+        margin-bottom: var(--space-md);
+        text-shadow: var(--shadow-glow-green);
+      }
+
+      .hud-text-victory {
+        font-size: var(--font-size-body);
+        line-height: var(--line-height-relaxed);
+        margin-bottom: var(--space-xl);
+        color: var(--color-text-primary);
+      }
+
+      .hud-btn-reiniciar {
+        background: var(--color-accent-green);
+        color: #000;
+        font-weight: var(--font-weight-semibold);
+        border-color: var(--color-accent-green);
+      }
+
+      .hud-btn-reiniciar:hover {
+        background: var(--color-accent-green);
+        color: #000;
+        border-color: rgba(16, 185, 129, 0.7);
+        box-shadow: var(--shadow-elevation-1), 0 0 0 1px rgba(16, 185, 129, 0.5);
+      }
+
+      /* ============================================================
        * ANIMACIONES UI
        * ============================================================ */
       @keyframes hud-card-enter {
@@ -396,9 +460,26 @@
         animation: hud-badge-pop var(--duration-base) var(--ease-out);
       }
 
+      /* Modal de Victoria */
+      @keyframes hud-modal-enter {
+        from {
+          opacity: 0;
+          transform: scale(0.9);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      .hud-modal-victory {
+        animation: hud-modal-enter var(--duration-slow) var(--ease-out);
+      }
+
       @media (prefers-reduced-motion: reduce) {
         .hud-card--message,
         .hud-skill-badge--enter,
+        .hud-modal-victory,
         .btn {
           animation: none !important;
           transition: none !important;

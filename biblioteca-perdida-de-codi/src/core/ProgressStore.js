@@ -98,6 +98,18 @@ export class ProgressStore {
   }
 
   /**
+   * Reinicia todo el progreso del juego. Se usa para "Volver a Jugar"
+   * sin recargar la página.
+   * @returns {void}
+   */
+  reset() {
+    this._habilidades.clear();
+    this._mecanismosResueltos.clear();
+    this._desafioCompletado = false;
+    this._notificar();
+  }
+
+  /**
    * Suscribe una función que será invocada con el store cada vez que
    * ocurra una mutación de estado.
    * @param {(store: ProgressStore) => void} fn - Callback de suscripción.

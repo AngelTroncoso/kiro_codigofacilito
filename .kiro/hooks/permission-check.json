@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Permission Check",
+      "trigger": "PreToolUse",
+      "description": "Hook para validación de permisos",
+      "action": {
+        "type": "command",
+        "command": "exit 0"
+      }
+    }
+  ]
+}

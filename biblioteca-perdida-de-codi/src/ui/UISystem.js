@@ -70,6 +70,50 @@ export class UISystem {
      * @private
      */
     this._habilidadesYaAnimadas = new Set();
+
+    /**
+     * Índice de misión actual para tracking de progreso guiado.
+     * @type {number}
+     * @private
+     */
+    this._misionActualIndex = 0;
+
+    /**
+     * Misión inicial (Bienvenido a la Isla).
+     * @type {string}
+     * @private
+     */
+    this._MISION_INICIAL = 'Explora el entorno y encuentra tu primer Libro de Conocimiento.';
+
+    /**
+     * Estado de misión actual para mostrar en el HUD.
+     * @type {{ titulo: string, descripcion: string } | null}
+     * @private
+     */
+    this._misionActualDisplay = null;
+
+    /**
+     * Indica si el jugador ha ganado (Victoria).
+     * @type {boolean}
+     * @private
+     */
+    this._jugadorGano = false;
+
+    /**
+     * H03: AudioContext nativo para efectos de sonido sintetizados.
+     * Se inicializa de forma lazy (tras primera interacción del usuario)
+     * para cumplir con las políticas de autoplay de los navegadores.
+     * @type {AudioContext | null}
+     * @private
+     */
+    this._audioContext = null;
+
+    /**
+     * Indica si el AudioContext ya fue inicializado (tras primera interacción).
+     * @type {boolean}
+     * @private
+     */
+    this._audioInicializado = false;
   }
 
   /**
@@ -127,13 +171,65 @@ export class UISystem {
    *
    * @param {import('../core/ProgressStore.js').ProgressStore} progreso
    * @param {number} [ahoraMs] - Instante actual explícito (por defecto `Date.now()`).
-   * @returns {{ habilidadesObtenidas: Set<string>, mensajeActivo: { texto: string, expiraEn: number, persistente?: boolean, esError?: boolean } | null }}
+   * @returns {{ habilidadesObtenidas: Set<string>, mensajeActivo: { texto: string, expiraEn: number, persistente?: boolean, esError?: boolean } | null, misionActual: { titulo: string, descripcion: string } }}
    */
   construirVista(progreso, ahoraMs = Date.now()) {
     this.ocultarMensajeSiExpirado(ahoraMs);
+    // Detectar si el jugador ganó (Desafío Final completado)
+    this._jugadorGano = progreso.desafioCompletado();
     return {
       habilidadesObtenidas: progreso.habilidades(),
       mensajeActivo: this._mensajeActivo,
+      misionActual: this._determinarMisionActual(progreso),
+      jugadorGano: this._jugadorGano,
+    };
+  }
+
+  /**
+   * Determina la misión actual basándose en el estado de progreso.
+   * Reutiliza ProgressStore para derivar la misión sin crear nuevo estado.
+   * @param {import('../core/ProgressStore.js').ProgressStore} progreso
+   * @returns {{ titulo: string, descripcion: string }}
+   * @private
+   */
+  _determinarMisionActual(progreso) {
+    // Si ya completó el desafío final
+    if (progreso.desafioCompletado()) {
+      return {
+        titulo: '¡Biblioteca Restaurada!',
+        descripcion: 'Has completado todos los objetivos. Explora libremente.',
+      };
+    }
+
+    // Determinar misión basada en habilidades obtenidas
+    const habilidades = Array.from(progreso.habilidades());
+    
+    if (habilidades.length === 0) {
+      return {
+        titulo: 'Misión Inicial',
+        descripcion: 'Explora el entorno y encuentra tu primer Libro de Conocimiento.',
+      };
+    } else if (habilidades.length === 1) {
+      return {
+        titulo: `Misión: ${habilidades[0].toUpperCase()}`,
+        descripcion: `Has obtenido ${habilidades[0]}. Usa esta habilidad para resolver mecanismos y avanzar.`,
+      };
+    } else if (habilidades.length === 2) {
+      return {
+        titulo: 'Misión: Desbloquear Zona Final',
+        descripcion: 'Tienes dos habilidades. Busca el tercer libro para acceder a la Biblioteca Corrupta.',
+      };
+    } else if (habilidades.length === 3) {
+      return {
+        titulo: 'Misión: Restaurar Biblioteca',
+        descripcion: 'Tienes las tres habilidades. Entra a la Biblioteca Corrupta y completa el Desafío Final.',
+      };
+    }
+
+    // Fallback
+    return {
+      titulo: 'Exploración',
+      descripcion: 'Sigue explorando la Isla y descubriendo nuevos secretos.',
     };
   }
 
@@ -200,6 +296,31 @@ export class UISystem {
       mensaje.style.left = '50%';
       mensaje.style.transform = 'translateX(-50%)';
       overlay.appendChild(mensaje);
+
+      // Panel de misión actual: muestra la misión actual en tiempo real
+      // se ubica debajo del mensaje contextual, a la izquierda
+      const panelMision = doc.createElement('div');
+      panelMision.id = 'ui-system-mision';
+      panelMision.className = 'hud-card hud-card--skills';
+      panelMision.style.position = 'fixed';
+      panelMision.style.bottom = '12px';
+      panelMision.style.left = '12px';
+      panelMision.style.minWidth = '180px';
+      overlay.appendChild(panelMision);
+
+      // Botón para reiniciar juego (solo visible cuando se gana)
+      const btnReiniciar = doc.createElement('button');
+      btnReiniciar.id = 'ui-system-btn-reiniciar';
+      btnReiniciar.className = 'btn';
+      btnReiniciar.textContent = 'Volver a Jugar';
+      btnReiniciar.style.position = 'fixed';
+      btnReiniciar.style.bottom = '12px';
+      btnReiniciar.style.left = '50%';
+      btnReiniciar.style.transform = 'translateX(-50%)';
+      btnReiniciar.style.marginTop = '16px';
+      btnReiniciar.style.zIndex = '1001';
+      btnReiniciar.style.display = 'none'; // Oculto por defecto
+      overlay.appendChild(btnReiniciar);
 
       // Panel de controles: estático (no depende de `progreso` ni cambia
       // entre frames), se puebla una única vez aquí mismo, en la creación
@@ -312,6 +433,75 @@ export class UISystem {
       mensaje.style.display = 'none';
       mensaje.classList.remove('is-error');
     }
+
+    // Panel de misión actual
+    const panelMision = overlay.querySelector('#ui-system-mision');
+    if (panelMision) {
+      panelMision.textContent = '';
+      const tituloMision = overlay.ownerDocument.createElement('div');
+      tituloMision.className = 'hud-title';
+      tituloMision.textContent = 'Misión Actual';
+      panelMision.appendChild(tituloMision);
+
+      const textoMision = overlay.ownerDocument.createElement('div');
+      textoMision.className = 'text-body';
+      textoMision.style.fontSize = 'var(--font-size-body)';
+      textoMision.style.lineHeight = 'var(--line-height-relaxed)';
+      textoMision.style.color = 'var(--color-text-primary)';
+      
+      if (vista.misionActual) {
+        const { titulo, descripcion } = vista.misionActual;
+        textoMision.innerHTML = `
+          <strong style="color: var(--color-accent-green); display: block; margin-bottom: var(--space-xs);">${titulo}</strong>
+          ${descripcion}
+        `;
+      } else {
+        textoMision.textContent = 'Explorando...';
+      }
+      
+      panelMision.appendChild(textoMision);
+    }
+
+    // Panel de Victoria (solo visible cuando el jugador gana)
+    const btnReiniciar = overlay.querySelector('#ui-system-btn-reiniciar');
+    if (btnReiniciar) {
+      if (vista.jugadorGano) {
+        btnReiniciar.style.display = 'inline-flex';
+      } else {
+        btnReiniciar.style.display = 'none';
+      }
+    }
+
+    // Modal de Victoria (solo visible cuando el jugador gana)
+    if (vista.jugadorGano) {
+      let modalVictoria = overlay.querySelector('.hud-overlay-victory');
+      if (!modalVictoria) {
+        modalVictoria = doc.createElement('div');
+        modalVictoria.className = 'hud-overlay-victory hud-modal-victory';
+        
+        const modalContent = doc.createElement('div');
+        modalContent.className = 'hud-card hud-card-victory';
+        
+        const titulo = doc.createElement('h2');
+        titulo.className = 'hud-title hud-title-victory';
+        titulo.textContent = '¡MISIÓN CUMPLIDA!';
+        modalContent.appendChild(titulo);
+        
+        const texto = doc.createElement('p');
+        texto.className = 'hud-text-victory';
+        texto.textContent = 'La Biblioteca ha sido salvada. Codi ha restaurado todo el conocimiento perdido.';
+        modalContent.appendChild(texto);
+        
+        modalVictoria.appendChild(modalContent);
+        overlay.appendChild(modalVictoria);
+      }
+    } else {
+      // Remover el modal si el jugador no ha ganado
+      const modalVictoria = overlay.querySelector('.hud-overlay-victory');
+      if (modalVictoria) {
+        modalVictoria.remove();
+      }
+    }
   }
 
   /**
@@ -353,5 +543,156 @@ export class UISystem {
 
     const relleno = barra.querySelector('.hud-progress-bar__fill');
     relleno.style.width = `${porcentaje}%`;
+  }
+
+  /**
+   * H03: Inicializa el AudioContext de forma lazy (tras primera interacción del usuario).
+   * Esto cumple con las políticas de autoplay de los navegadores modernos.
+   * @private
+   * @returns {void}
+   */
+  _inicializarAudio() {
+    if (this._audioInicializado) return;
+
+    try {
+      // Soporte cross-browser: AudioContext o webkitAudioContext
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) {
+        this._audioContext = new AudioContextClass();
+        this._audioInicializado = true;
+      }
+    } catch (error) {
+      // Si falla la inicialización, silenciosamente continúa sin audio
+      // (no bloquea la experiencia de juego)
+      // eslint-disable-next-line no-console
+      console.warn('[UISystem] Audio no disponible:', error);
+    }
+  }
+
+  /**
+   * H03: Reproduce un sonido sintetizado con frecuencia y duración especificadas.
+   * Helper genérico para crear efectos de sonido mediante Web Audio API.
+   * @private
+   * @param {number} frecuencia - Frecuencia en Hz
+   * @param {number} duracion - Duración en segundos
+   * @param {string} [tipo='sine'] - Tipo de onda: 'sine', 'square', 'sawtooth', 'triangle'
+   * @param {number} [ganancia=0.15] - Volumen (0-1)
+   * @returns {void}
+   */
+  _reproducirTono(frecuencia, duracion, tipo = 'sine', ganancia = 0.15) {
+    this._inicializarAudio();
+    
+    if (!this._audioContext) return;
+
+    try {
+      const ahora = this._audioContext.currentTime;
+      
+      // Crear oscilador (genera la onda de sonido)
+      const oscilador = this._audioContext.createOscillator();
+      oscilador.type = tipo;
+      oscilador.frequency.setValueAtTime(frecuencia, ahora);
+      
+      // Crear nodo de ganancia (controla el volumen)
+      const nodoGanancia = this._audioContext.createGain();
+      nodoGanancia.gain.setValueAtTime(ganancia, ahora);
+      // Fade out suave para evitar "clicks" al terminar
+      nodoGanancia.gain.exponentialRampToValueAtTime(0.01, ahora + duracion);
+      
+      // Conectar: oscilador -> ganancia -> salida
+      oscilador.connect(nodoGanancia);
+      nodoGanancia.connect(this._audioContext.destination);
+      
+      // Reproducir
+      oscilador.start(ahora);
+      oscilador.stop(ahora + duracion);
+    } catch (error) {
+      // Silenciosamente continúa si hay error (no bloquea gameplay)
+      // eslint-disable-next-line no-console
+      console.warn('[UISystem] Error reproduciendo audio:', error);
+    }
+  }
+
+  /**
+   * H03: Sonido al recoger libro/habilidad - Tono agudo y alegre ascendente.
+   * Frecuencia ascendente rápida que transmite obtención de poder/conocimiento.
+   * @returns {void}
+   */
+  reproducirSonidoRecoleccion() {
+    this._inicializarAudio();
+    
+    if (!this._audioContext) return;
+
+    try {
+      const ahora = this._audioContext.currentTime;
+      const duracion = 0.3;
+      
+      const oscilador = this._audioContext.createOscillator();
+      oscilador.type = 'sine';
+      // Frecuencia ascendente: 440 Hz (A4) -> 880 Hz (A5)
+      oscilador.frequency.setValueAtTime(440, ahora);
+      oscilador.frequency.exponentialRampToValueAtTime(880, ahora + duracion);
+      
+      const nodoGanancia = this._audioContext.createGain();
+      nodoGanancia.gain.setValueAtTime(0.2, ahora);
+      nodoGanancia.gain.exponentialRampToValueAtTime(0.01, ahora + duracion);
+      
+      oscilador.connect(nodoGanancia);
+      nodoGanancia.connect(this._audioContext.destination);
+      
+      oscilador.start(ahora);
+      oscilador.stop(ahora + duracion);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('[UISystem] Error reproduciendo sonido de recolección:', error);
+    }
+  }
+
+  /**
+   * H03: Sonido de click para botones UI - Click sutil y corto.
+   * Feedback táctil mínimo pero perceptible para interacciones de UI.
+   * @returns {void}
+   */
+  reproducirSonidoClick() {
+    this._reproducirTono(800, 0.05, 'square', 0.1);
+  }
+
+  /**
+   * H03: Sonido de Victoria - Arpegio ascendente de 3 notas (fanfarria).
+   * Celebración épica pero breve para el momento de Victoria.
+   * @returns {void}
+   */
+  reproducirSonidoVictoria() {
+    this._inicializarAudio();
+    
+    if (!this._audioContext) return;
+
+    try {
+      const ahora = this._audioContext.currentTime;
+      // Arpegio Do-Mi-Sol en octava alta: C5-E5-G5
+      const notas = [523.25, 659.25, 783.99]; // Hz
+      const duracionNota = 0.25;
+      const espacioEntreNotas = 0.15;
+      
+      notas.forEach((frecuencia, index) => {
+        const tiempoInicio = ahora + (index * espacioEntreNotas);
+        
+        const oscilador = this._audioContext.createOscillator();
+        oscilador.type = 'triangle';
+        oscilador.frequency.setValueAtTime(frecuencia, tiempoInicio);
+        
+        const nodoGanancia = this._audioContext.createGain();
+        nodoGanancia.gain.setValueAtTime(0.18, tiempoInicio);
+        nodoGanancia.gain.exponentialRampToValueAtTime(0.01, tiempoInicio + duracionNota);
+        
+        oscilador.connect(nodoGanancia);
+        nodoGanancia.connect(this._audioContext.destination);
+        
+        oscilador.start(tiempoInicio);
+        oscilador.stop(tiempoInicio + duracionNota);
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('[UISystem] Error reproduciendo sonido de victoria:', error);
+    }
   }
 }
