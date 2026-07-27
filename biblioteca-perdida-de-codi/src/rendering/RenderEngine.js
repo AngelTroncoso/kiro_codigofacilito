@@ -6,6 +6,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { actualizarAspecto } from '../camera/CameraSystem.js';
 import { aplicarShaderCorrupcion } from './corruptionShader.js';
 import { AmbientLifeController } from './AmbientLifeController.js';
+import { ZONAS } from '../world/zones.data.js';
 
 /**
  * Detecta si el navegador actual soporta WebGL (1 o 2), sin necesidad de
@@ -195,9 +196,12 @@ export class RenderEngine {
     const fov = config.fov ?? 65;
     const near = config.near ?? 0.1;
     const far = config.far ?? 1000;
-    const intensidadAmbiental = config.intensidadAmbiental ?? 0.6;
+    // HACKATHON AWS: Intensidades aumentadas para demo ante el jurado
+    // (0.6 → 1.4 ambiental, 1.0 → 2.2 direccional) para asegurar que
+    // la textura AWS y el escenario sean claramente visibles.
+    const intensidadAmbiental = config.intensidadAmbiental ?? 1.4;
     const intensidadHemisferio = config.intensidadHemisferio ?? 0.45;
-    const intensidadDireccional = config.intensidadDireccional ?? 1.0;
+    const intensidadDireccional = config.intensidadDireccional ?? 2.2;
     const intensidadAcento = config.intensidadAcento ?? 8;
     const usarPostprocesado = config.usarPostprocesado ?? true;
 
@@ -253,6 +257,11 @@ export class RenderEngine {
     // parametrizadas vía `config` (ver JSDoc del constructor) y se guardan
     // como propiedades privadas para permitir ajustes futuros (p.ej. ciclo
     // día/noche, perfil gráfico dinámico).
+    //
+    // HACKATHON AWS: Intensidades aumentadas significativamente para la
+    // demo ante el jurado (ambientLight 0.6 → 1.4, directionalLight 1.0 → 2.2)
+    // para asegurar que la textura AWS sea 100% visible sobre las plataformas
+    // y el escenario sea claramente distinguible.
     /** @private */
     this._luzAmbiental = new THREE.AmbientLight(0x1a2b4c, intensidadAmbiental);
     this._scene.add(this._luzAmbiental);
@@ -510,6 +519,131 @@ export class RenderEngine {
     this._scene.add(this._detallesAmbientales);
 
     /**
+     * @private - HACKATHON AWS: marcadores de ruta visuales (pathmarkers)
+     * ELIMINADOS COMPLETAMENTE para despejar el centro de las plataformas.
+     * Los objetos amarillos/dorados que aparecían en el suelo han sido
+     * removidos para dejar el camino completamente libre para Codi.
+     */
+    this._pathmarkers = this._crearPathmarkers(); // Ahora devuelve grupo vacío
+    this._scene.add(this._pathmarkers); // Se mantiene para compatibilidad (vacío)
+
+    /**
+     * @private - HACKATHON AWS: palmeras procedurales cyberpunk distribuidas
+     * en TODAS las zonas/islas del mapa para enriquecer la escenografía
+     * completa. Itera sobre ZONAS de zones.data.js y posiciona 2-3 palmeras
+     * en bordes/esquinas de cada plataforma. Geometrías básicas de Three.js
+     * (CylinderGeometry + ConeGeometry), sin assets externos. Puramente
+     * decorativas, no colisionan ni afectan gameplay.
+     */
+    for (const zona of ZONAS) {
+      const { min, max } = zona.limites;
+      const centroX = (min.x + max.x) / 2;
+      const centroZ = (min.z + max.z) / 2;
+      const anchoX = max.x - min.x;
+      const anchoZ = max.z - min.z;
+      
+      // 2-3 palmeras estratégicas por zona en bordes/esquinas
+      const posicionesPalmerasZona = [
+        // Esquinas
+        { x: min.x + 2, z: min.z + 2 },     // Esquina noroeste
+        { x: max.x - 2, z: min.z + 2 },     // Esquina noreste
+        { x: min.x + 2, z: max.z - 2 },     // Esquina suroeste
+        { x: max.x - 2, z: max.z - 2 },     // Esquina sureste
+        // Bordes laterales (norte/sur)
+        { x: centroX, z: min.z + 1.5 },     // Centro borde norte
+        { x: centroX, z: max.z - 1.5 },     // Centro borde sur
+      ];
+      
+      for (const pos of posicionesPalmerasZona) {
+        const palmera = this._crearPalmeraProcedural();
+        palmera.position.set(pos.x, 0, pos.z);
+        this._scene.add(palmera);
+      }
+    }
+
+    /**
+     * @private - HACKATHON AWS: letreros de señalización con neón en
+     * esquinas/bordes de cada zona para marcar visualmente puntos de
+     * interés y facilitar orientación del jugador. Postes verticales con
+     * paneles neón (cian/naranja alternados por zona). Posicionados
+     * estratégicamente en bordes traseros/esquinas para no obstruir el
+     * camino central de Codi. Puramente decorativos, no colisionan ni
+     * afectan gameplay.
+     */
+    for (let i = 0; i < ZONAS.length; i += 1) {
+      const zona = ZONAS[i];
+      const { min, max } = zona.limites;
+      
+      // Alternar color neón por zona (cian/naranja) para variedad visual
+      const colorNeon = i % 2 === 0 ? 'cian' : 'naranja';
+      
+      // Posiciones estratégicas en esquinas traseras (borde norte)
+      const posicionesLetreros = [
+        { x: min.x + 1.5, z: min.z + 1 },  // Esquina noroeste trasera
+        { x: max.x - 1.5, z: min.z + 1 },  // Esquina noreste trasera
+      ];
+      
+      for (const pos of posicionesLetreros) {
+        const letrero = this._crearLetreroSenal(colorNeon);
+        letrero.position.set(pos.x, 0, pos.z);
+        this._scene.add(letrero);
+      }
+    }
+
+    /**
+     * @private - PORTAL DE RESTAURACIÓN: Puerta final al final de la última isla.
+     * Se activa visualmente al 100% cuando Codi obtiene las 3 habilidades (Python, JS, SQL).
+     * Posicionado en el borde este de la última zona (biblioteca-corrupta).
+     */
+    const ultimaZona = ZONAS[ZONAS.length - 1];
+    const portalRestauracion = this._crearPortalRestauracion();
+    
+    // Posicionar portal en el borde este (salida) de la última zona
+    const bordeEstePortal = ultimaZona.limites.max.x - 2;
+    const centroZPortal = (ultimaZona.limites.min.z + ultimaZona.limites.max.z) / 2;
+    portalRestauracion.position.set(bordeEstePortal, 0, centroZPortal);
+    
+    this._scene.add(portalRestauracion);
+    
+    // Guardar referencia al portal para controlarlo desde main.js
+    this._portalRestauracion = portalRestauracion;
+
+    /**
+     * @private - HACKATHON AWS: flechas direccionales entre zonas/islas
+     * ELIMINADAS POR SOLICITUD DEL USUARIO: Las flechas amarillas con forma
+     * de megáfono/satélite que flotaban entre islas han sido removidas para
+     * despejar visualmente el espacio entre plataformas.
+     * 
+     * NOTA: Los libros de habilidades (Python, JS, SQL) y mecanismos siguen
+     * renderizándose normalmente - solo se eliminaron las flechas guía.
+     */
+    // CÓDIGO COMENTADO - Flechas direccionales eliminadas:
+    /*
+    for (let i = 0; i < ZONAS.length - 1; i += 1) {
+      const zonaActual = ZONAS[i];
+      const zonaSiguiente = ZONAS[i + 1];
+      
+      // Posicionar flecha en borde este (salida) de zona actual
+      const bordeX = zonaActual.limites.max.x - 1;
+      const centroZ = (zonaActual.limites.min.z + zonaActual.limites.max.z) / 2;
+      
+      // Calcular dirección hacia zona siguiente (normalizada en XZ)
+      const centroActualX = (zonaActual.limites.min.x + zonaActual.limites.max.x) / 2;
+      const centroSiguienteX = (zonaSiguiente.limites.min.x + zonaSiguiente.limites.max.x) / 2;
+      const centroSiguienteZ = (zonaSiguiente.limites.min.z + zonaSiguiente.limites.max.z) / 2;
+      const dirX = centroSiguienteX - centroActualX;
+      const dirZ = centroSiguienteZ - centroZ;
+      const anguloY = Math.atan2(dirX, dirZ);
+      
+      // Crear y posicionar flecha
+      const flecha = this._crearFlechaDireccional();
+      flecha.position.set(bordeX, 1.5, centroZ);
+      flecha.rotation.y = anguloY;
+      this._scene.add(flecha);
+    }
+    */
+
+    /**
      * @private - "Ambient Life Controller" (SPEC-06: Living World —
      * Ambient Life System, sección 1): coordina exclusivamente la
      * animación de los Cristales de Conocimiento y Glifos Antiguos
@@ -666,6 +800,272 @@ export class RenderEngine {
     }
 
     return { grupo, cristales, glifos };
+  }
+
+  /**
+   * HACKATHON AWS: Método ELIMINADO - Los pathmarkers (baldosas amarillas/
+   * cian en el suelo) han sido completamente removidos para despejar el
+   * centro de las plataformas y dejar el camino libre para Codi.
+   * 
+   * @private
+   * @returns {THREE.Group} - Grupo vacío (no se renderiza nada)
+   */
+  _crearPathmarkers() {
+    // ELIMINADO INTENCIONALMENTE: ya no se crean objetos amarillos/dorados
+    // en el centro de las plataformas. El camino queda completamente despejado.
+    return new THREE.Group(); // Grupo vacío para mantener compatibilidad
+  }
+
+  /**
+   * HACKATHON AWS: Crea una palmera procedural cyberpunk usando geometrías
+   * básicas de Three.js. Decoración escenográfica para enriquecer la isla
+   * sin agregar assets externos (JPG/PNG/GLB).
+   * 
+   * - Tronco: CylinderGeometry con textura marrón/dorada, ligeramente
+   *   inclinado para simular organicidad.
+   * - Hojas: 5-6 ConeGeometry verdes cian distribuidas radialmente en la
+   *   corona, orientadas hacia afuera/arriba para simular palmera.
+   * 
+   * Puramente decorativas: no colisionan, no afectan gameplay. Se instancian
+   * en bordes/esquinas de plataformas sin obstruir el paso de Codi.
+   * 
+   * @private
+   * @returns {THREE.Group}
+   */
+  _crearPalmeraProcedural() {
+    const grupo = new THREE.Group();
+
+    // TRONCO: CylinderGeometry marrón/dorado con inclinación leve
+    const geometriaTronco = new THREE.CylinderGeometry(0.15, 0.18, 2.5, 8);
+    const materialTronco = new THREE.MeshStandardMaterial({
+      color: 0x8B7355, // Marrón/dorado
+      roughness: 0.8,
+      metalness: 0.1,
+    });
+    const tronco = new THREE.Mesh(geometriaTronco, materialTronco);
+    tronco.position.y = 1.25; // Centro del cilindro a media altura
+    // Inclinación aleatoria leve para variar visualmente
+    tronco.rotation.z = (Math.random() - 0.5) * 0.15;
+    tronco.rotation.x = (Math.random() - 0.5) * 0.15;
+    grupo.add(tronco);
+
+    // HOJAS: 5-6 ConeGeometry verde cian distribuidas radialmente
+    const geometriaHoja = new THREE.ConeGeometry(0.6, 1.2, 8);
+    const materialHoja = new THREE.MeshStandardMaterial({
+      color: 0x1fce6b, // Verde cian cyberpunk (match con cristales de conocimiento)
+      emissive: 0x1fce6b,
+      emissiveIntensity: 0.2, // Ligero glow para estética cyberpunk
+      roughness: 0.4,
+      metalness: 0.2,
+    });
+
+    const cantidadHojas = 5 + Math.floor(Math.random() * 2); // 5 o 6 hojas
+    const alturaCorona = 2.3; // Justo sobre el tronco
+
+    for (let i = 0; i < cantidadHojas; i += 1) {
+      const hoja = new THREE.Mesh(geometriaHoja, materialHoja.clone());
+      
+      // Distribución radial uniforme
+      const angulo = (i / cantidadHojas) * Math.PI * 2;
+      
+      // Posición en corona
+      hoja.position.y = alturaCorona;
+      hoja.position.x = Math.cos(angulo) * 0.3;
+      hoja.position.z = Math.sin(angulo) * 0.3;
+      
+      // Rotación: inclinar hacia afuera/arriba para simular hojas de palmera
+      hoja.rotation.z = Math.cos(angulo) * (Math.PI / 3); // Inclinación hacia afuera
+      hoja.rotation.x = Math.sin(angulo) * (Math.PI / 3);
+      hoja.rotation.y = angulo; // Orientar hacia afuera radialmente
+      
+      grupo.add(hoja);
+    }
+
+    return grupo;
+  }
+
+  /**
+   * HACKATHON AWS: Crea una flecha direccional procedural para señalizar
+   * el camino entre zonas/islas. Usa geometrías básicas de Three.js
+   * (ConeGeometry para punta + BoxGeometry para cuerpo) con material
+   * emisivo naranja brillante (color AWS) para máxima visibilidad.
+   * 
+   * La flecha apunta en dirección +Z local, por lo que se debe rotar con
+   * rotation.y según la dirección deseada hacia la siguiente isla.
+   * 
+   * Puramente decorativa: no colisiona, no afecta gameplay. Se instancia
+   * flotando entre islas para guiar al jugador y al jurado.
+   * 
+   * @private
+   * @returns {THREE.Group}
+   */
+  _crearFlechaDireccional() {
+    const grupo = new THREE.Group();
+
+    // Material emisivo naranja AWS para máxima visibilidad
+    const materialFlecha = new THREE.MeshStandardMaterial({
+      color: 0xFF9900, // Naranja AWS
+      emissive: 0xFF9900,
+      emissiveIntensity: 0.9, // Brillo fuerte para ser visible desde lejos
+      roughness: 0.3,
+      metalness: 0.4,
+    });
+
+    // PUNTA DE FLECHA: ConeGeometry apuntando en +Z
+    const geometriaPunta = new THREE.ConeGeometry(0.5, 1.2, 8);
+    const punta = new THREE.Mesh(geometriaPunta, materialFlecha.clone());
+    punta.position.z = 0.6; // Desplazar hacia adelante
+    punta.rotation.x = -Math.PI / 2; // Rotar para apuntar en +Z
+    grupo.add(punta);
+
+    // CUERPO DE FLECHA: BoxGeometry como barra horizontal
+    const geometriaCuerpo = new THREE.BoxGeometry(0.3, 0.15, 0.8);
+    const cuerpo = new THREE.Mesh(geometriaCuerpo, materialFlecha.clone());
+    cuerpo.position.z = -0.2; // Detrás de la punta
+    grupo.add(cuerpo);
+
+    // ALETAS LATERALES: dos BoxGeometry pequeñas en forma de V invertida
+    const geometriaAleta = new THREE.BoxGeometry(0.6, 0.1, 0.2);
+    
+    const aletaIzquierda = new THREE.Mesh(geometriaAleta, materialFlecha.clone());
+    aletaIzquierda.position.set(-0.3, 0, -0.5);
+    aletaIzquierda.rotation.z = Math.PI / 6; // Inclinación diagonal
+    grupo.add(aletaIzquierda);
+    
+    const aletaDerecha = new THREE.Mesh(geometriaAleta, materialFlecha.clone());
+    aletaDerecha.position.set(0.3, 0, -0.5);
+    aletaDerecha.rotation.z = -Math.PI / 6; // Inclinación diagonal opuesta
+    grupo.add(aletaDerecha);
+
+    return grupo;
+  }
+
+  /**
+   * HACKATHON AWS: Crea un letrero de señalización con poste vertical y
+   * panel neón superior para marcar puntos de interés en las esquinas/
+   * bordes de las islas. Geometrías básicas de Three.js (CylinderGeometry
+   * para poste + BoxGeometry para panel) con material emisivo brillante
+   * para simular neón.
+   * 
+   * Diseñado para estar en bordes/esquinas de las islas dejando el camino
+   * central completamente despejado para Codi.
+   * 
+   * Puramente decorativo: no colisiona, no afecta gameplay. Sustituye el
+   * indicador anterior (si existía) por señalética más clara en posición
+   * estratégica.
+   * 
+   * @private
+   * @param {'cian'|'naranja'} [colorNeon='cian'] - Color del panel neón
+   * @returns {THREE.Group}
+   */
+  _crearLetreroSenal(colorNeon = 'cian') {
+    const grupo = new THREE.Group();
+
+    // POSTE/BASE: CylinderGeometry delgado vertical en gris metalizado oscuro
+    const geometriaPoste = new THREE.CylinderGeometry(0.1, 0.1, 2.5, 8);
+    const materialPoste = new THREE.MeshStandardMaterial({
+      color: 0x3a3a3a, // Gris oscuro metalizado
+      roughness: 0.6,
+      metalness: 0.7,
+    });
+    const poste = new THREE.Mesh(geometriaPoste, materialPoste);
+    poste.position.y = 1.25; // Centro del cilindro a media altura
+    grupo.add(poste);
+
+    // PANEL SUPERIOR: BoxGeometry rectangular plano montado arriba del poste
+    const geometriaPanel = new THREE.BoxGeometry(1.2, 0.6, 0.1);
+    
+    // Material neón según color especificado
+    const coloresNeon = {
+      cian: 0x00f3ff,
+      naranja: 0xFF9900,
+    };
+    const colorHex = coloresNeon[colorNeon] || coloresNeon.cian;
+    
+    const materialPanel = new THREE.MeshStandardMaterial({
+      color: colorHex,
+      emissive: colorHex,
+      emissiveIntensity: 0.9, // Brillo fuerte tipo neón
+      roughness: 0.2,
+      metalness: 0.3,
+    });
+    
+    const panel = new THREE.Mesh(geometriaPanel, materialPanel);
+    panel.position.y = 2.8; // Montado arriba del poste
+    grupo.add(panel);
+
+    return grupo;
+  }
+
+  /**
+   * PORTAL DE RESTAURACIÓN: Crea un arco/marco tecnológico con un plano
+   * interior emisivo que funciona como puerta final de la Biblioteca.
+   * Se activa al 100% cuando Codi obtiene las 3 habilidades (Python, JS, SQL).
+   * 
+   * Componentes:
+   * - MARCO/ARCO: Estructura de BoxGeometry en forma de portal (2 pilares + dintel)
+   * - PLANO INTERIOR: BoxGeometry plano y delgado con material emisivo cian/dorado
+   * - ESTADO DINÁMICO: La intensidad emisiva se controla externamente desde main.js
+   * 
+   * @private
+   * @returns {THREE.Group} Grupo con el portal completo y userData.portalInterior
+   *   para controlar la intensidad emisiva desde el loop del juego
+   */
+  _crearPortalRestauracion() {
+    const grupo = new THREE.Group();
+
+    // Material del marco/estructura (metal oscuro con leve brillo cian)
+    const materialMarco = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,      // Gris azulado oscuro
+      emissive: 0x06b6d4,   // Cian sutil
+      emissiveIntensity: 0.2,
+      roughness: 0.5,
+      metalness: 0.8,
+    });
+
+    // PILAR IZQUIERDO del arco
+    const geometriaPilar = new THREE.BoxGeometry(0.4, 4, 0.4);
+    const pilarIzq = new THREE.Mesh(geometriaPilar, materialMarco);
+    pilarIzq.position.set(-2, 2, 0);
+    grupo.add(pilarIzq);
+
+    // PILAR DERECHO del arco
+    const pilarDer = new THREE.Mesh(geometriaPilar, materialMarco.clone());
+    pilarDer.position.set(2, 2, 0);
+    grupo.add(pilarDer);
+
+    // DINTEL/TECHO del arco (parte superior horizontal)
+    const geometriaDintel = new THREE.BoxGeometry(4.8, 0.4, 0.4);
+    const dintel = new THREE.Mesh(geometriaDintel, materialMarco.clone());
+    dintel.position.set(0, 4, 0);
+    grupo.add(dintel);
+
+    // PLANO INTERIOR EMISIVO (la "puerta" del portal)
+    // Este plano es el que brillará con intensidad variable según el progreso
+    const geometriaPortal = new THREE.BoxGeometry(3.6, 3.6, 0.1);
+    const materialPortal = new THREE.MeshStandardMaterial({
+      color: 0x00f3ff,          // Cian brillante
+      emissive: 0x00f3ff,        // Mismo color emisivo
+      emissiveIntensity: 0.3,    // Intensidad inicial baja (inactivo)
+      roughness: 0.1,
+      metalness: 0.2,
+      transparent: true,
+      opacity: 0.7,
+    });
+
+    const portalInterior = new THREE.Mesh(geometriaPortal, materialPortal);
+    portalInterior.position.set(0, 2, 0);
+    grupo.add(portalInterior);
+
+    // Guardar referencia al plano interior para controlar su brillo desde fuera
+    grupo.userData.portalInterior = portalInterior;
+    grupo.userData.esPortalRestauracion = true;
+
+    // ROTACIÓN: Orientar el portal DE FRENTE al camino (90 grados en Y)
+    // para que Codi pueda atravesarlo directamente sin chocar de lado
+    grupo.rotation.y = Math.PI / 2;
+
+    return grupo;
   }
 
   /**

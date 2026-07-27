@@ -247,8 +247,9 @@ describe('RenderEngine - SPEC-03 World Atmosphere & Rendering (iluminación, som
     const renderEngine = new RenderEngine(createCanvasMock());
     const luces = renderEngine.scene.children.filter((hijo) => hijo.isLight);
 
-    expect(luces.find((l) => l instanceof THREE.AmbientLight).intensity).toBeCloseTo(0.6);
-    expect(luces.find((l) => l instanceof THREE.DirectionalLight).intensity).toBeCloseTo(1.0);
+    // HACKATHON AWS: Intensidades aumentadas para demo (0.6→1.4, 1.0→2.2)
+    expect(luces.find((l) => l instanceof THREE.AmbientLight).intensity).toBeCloseTo(1.4);
+    expect(luces.find((l) => l instanceof THREE.DirectionalLight).intensity).toBeCloseTo(2.2);
     expect(luces.find((l) => l instanceof THREE.PointLight).intensity).toBeCloseTo(8);
   });
 

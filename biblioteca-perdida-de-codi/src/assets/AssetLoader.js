@@ -261,14 +261,25 @@ export class AssetLoader {
         // apenas perceptible, no un módulo activo como los mecanismos) —
         // color/roughness/metalness base sin cambios respecto a la
         // implementación previa (AssetLoader.fallback.test.js los fija).
+        //
+        // HACKATHON AWS: Textura dinámica con logo AWS proyectado + emissive
+        // naranja brillante para que el logo brille con luz propia, visible
+        // en cualquier condición de iluminación. La textura se asigna tanto
+        // a `map` (color base) como a `emissiveMap` (emisión de luz) para
+        // máxima visibilidad del sponsor oficial.
         geometria = new THREE.BoxGeometry(10, 0.5, 10);
-        material = new THREE.MeshStandardMaterial({
-          color: 0x1e293b,
-          roughness: 0.85,
-          metalness: 0.6,
-          emissive: 0x16233a,
-          emissiveIntensity: 0.15,
-        });
+        {
+          const texturaAWS = this._crearTexturaAWS();
+          material = new THREE.MeshStandardMaterial({
+            color: 0x1e293b,
+            roughness: 0.85,
+            metalness: 0.6,
+            emissive: new THREE.Color(0xFF9900), // Naranja AWS como emisión de luz
+            emissiveIntensity: 0.8, // Intensidad calibrada para brillo sin saturar
+            map: texturaAWS, // Textura AWS como color base
+            emissiveMap: texturaAWS, // Misma textura para emisión de luz propia
+          });
+        }
         break;
       case 'mecanismo':
         // Mismo metal oscuro de base que las plataformas, pero con un
@@ -284,6 +295,9 @@ export class AssetLoader {
         });
         break;
       case 'libro':
+        // Los libros de conocimiento se crean con geometría genérica aquí,
+        // pero se personalizan por habilidad en main.js usando
+        // _crearLibroConocimiento3D() cuando se clonan y posicionan.
         geometria = new THREE.BoxGeometry(0.4, 0.5, 0.3);
         material = new THREE.MeshStandardMaterial({ color: 0xf4c430 });
         break;
@@ -538,6 +552,62 @@ export class AssetLoader {
   }
 
   /**
+   * HACKATHON AWS: Genera una textura dinámica usando HTML Canvas con el
+   * logo "AWS" prominente y limpio en naranja oficial (#FF9900) sobre fondo
+   * oscuro profesional.
+   * 
+   * Diseño simplificado: Fondo azul oscuro profundo (#070b19), marco naranja
+   * de 12px, logo "AWS" ultra-bold centrado en tamaño prominente (200px).
+   * 
+   * Cero archivos externos - todo generado en memoria mediante Canvas 2D API.
+   * 
+   * @private
+   * @returns {import('three').CanvasTexture}
+   */
+  _crearTexturaAWS() {
+    // Crear canvas en memoria (sin agregarlo al DOM)
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      // Fallback: retornar textura vacía si canvas no está disponible
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // Fondo azul oscuro profundo (coherente con estética de servidor)
+    ctx.fillStyle = '#070b19';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Marco naranja AWS de 12px de grosor
+    ctx.strokeStyle = '#FF9900';
+    ctx.lineWidth = 12;
+    ctx.strokeRect(6, 6, canvas.width - 12, canvas.height - 12);
+
+    // Configuración de texto AWS principal (ultra-bold, 200px prominente)
+    ctx.fillStyle = '#FF9900'; // Naranja oficial de AWS
+    ctx.font = '900 200px Arial, sans-serif'; // 900 = ultra-bold, tamaño aumentado
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    // Glow naranja intenso para efecto neón brillante
+    ctx.shadowColor = '#FF9900';
+    ctx.shadowBlur = 40;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
+    // Dibujar "AWS" centrado (sin textos adicionales)
+    ctx.fillText('AWS', canvas.width / 2, canvas.height / 2);
+
+    // Crear y configurar la textura de Three.js
+    const textura = new THREE.CanvasTexture(canvas);
+    textura.needsUpdate = true;
+    
+    return textura;
+  }
+
+  /**
    * Carga un único asset del manifiesto. Nunca rechaza la Promise devuelta:
    * cualquier error de `GLTFLoader` (archivo faltante, corrupto, error de
    * red) se captura internamente y se refleja en el campo `error` del
@@ -654,4 +724,86 @@ export class AssetLoader {
 
     return { modelos, errores, fallaCritica, assetsConRespaldo };
   }
+
+  /**
+   * Crea un "Libro de Conocimiento" 3D procedural con geometrías nativas de
+   * Three.js, diseñado para ser visualmente reconocible como un libro real
+   * con portada, páginas y lomo. El color de la portada se asigna según la
+   * habilidad del lenguaje de programación.
+   * 
+   * Componentes del libro:
+   * - PORTADA/PASTA: BoxGeometry con el color distintivo del lenguaje
+   *   (Python azul, JavaScript amarillo, SQL cian) + emissive para brillo
+   * - HOJAS/PÁGINAS: BoxGeometry interior blanco/crema que simula el bloque
+   *   de hojas sobresaliendo por 3 lados
+   * - LOMO: Sección lateral de la portada ligeramente más gruesa
+   * 
+   * El libro se retorna dentro de un THREE.Group con rotación inicial de
+   * ~15 grados para darle aspecto dinámico de ítem coleccionable.
+   * 
+   * @param {'python'|'javascript'|'sql'} habilidadId - Identificador de la
+   *   habilidad para determinar el color de la portada
+   * @returns {THREE.Group} Grupo que contiene el libro 3D completo
+   */
+  crearLibroConocimiento3D(habilidadId) {
+    const grupo = new THREE.Group();
+
+    // Colores por lenguaje de programación
+    const COLORES_POR_HABILIDAD = {
+      python: 0x306998,      // Azul Python oficial
+      javascript: 0xf7df1e,  // Amarillo JavaScript oficial
+      sql: 0x00758f,         // Azul cian tecnológico SQL
+    };
+
+    const colorPortada = COLORES_POR_HABILIDAD[habilidadId] || 0x8b4513; // Café por defecto
+
+    // PORTADA/PASTA - Tapa frontal y trasera del libro
+    const geometriaPortada = new THREE.BoxGeometry(0.5, 0.7, 0.05);
+    const materialPortada = new THREE.MeshStandardMaterial({
+      color: colorPortada,
+      emissive: colorPortada,
+      emissiveIntensity: 0.4, // Brillo para destacar sobre la plataforma
+      roughness: 0.6,
+      metalness: 0.2,
+    });
+
+    // Tapa frontal
+    const portadaFrontal = new THREE.Mesh(geometriaPortada, materialPortada);
+    portadaFrontal.position.z = 0.125;
+    grupo.add(portadaFrontal);
+
+    // Tapa trasera
+    const portadaTrasera = new THREE.Mesh(geometriaPortada, materialPortada.clone());
+    portadaTrasera.position.z = -0.125;
+    grupo.add(portadaTrasera);
+
+    // LOMO - Lateral del libro (un poco más grueso)
+    const geometriaLomo = new THREE.BoxGeometry(0.52, 0.72, 0.05);
+    const lomo = new THREE.Mesh(geometriaLomo, materialPortada.clone());
+    lomo.rotation.y = Math.PI / 2; // Rotar 90° para que sea el lateral
+    lomo.position.x = -0.225;
+    grupo.add(lomo);
+
+    // HOJAS/PÁGINAS - Bloque interior blanco/crema
+    const geometriaPaginas = new THREE.BoxGeometry(0.44, 0.64, 0.2);
+    const materialPaginas = new THREE.MeshStandardMaterial({
+      color: 0xf0f0f0,      // Blanco/crema para simular papel
+      roughness: 0.9,       // Alta rugosidad para textura de papel
+      metalness: 0.0,
+    });
+    const paginas = new THREE.Mesh(geometriaPaginas, materialPaginas);
+    paginas.position.x = 0.03; // Desplazar ligeramente para que sobresalga del lado opuesto al lomo
+    grupo.add(paginas);
+
+    // Inclinación inicial de ~15 grados para aspecto dinámico
+    grupo.rotation.x = Math.PI / 12; // ~15 grados
+    grupo.rotation.z = -Math.PI / 24; // ~7.5 grados adicionales en Z
+
+    // Metadata para identificar que es un libro de conocimiento
+    grupo.userData.esLibroConocimiento = true;
+    grupo.userData.habilidadId = habilidadId;
+
+    return grupo;
+  }
 }
+

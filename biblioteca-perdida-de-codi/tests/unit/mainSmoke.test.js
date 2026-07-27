@@ -112,6 +112,14 @@ function createAssetLoaderMockClase() {
       }
       return { modelos, errores: [], fallaCritica: false };
     }
+
+    /**
+     * Mock del método crearLibroConocimiento3D que genera un objeto3D mock
+     * simple en lugar de la geometría real 3D detallada.
+     */
+    crearLibroConocimiento3D(habilidadId) {
+      return createObjeto3DMock();
+    }
   };
 }
 

@@ -426,13 +426,13 @@ export async function iniciarJuego(dependencias = {}) {
     }
 
     for (const libro of estado.librosActivos) {
-      const modeloBase = resultadoCarga.modelos.get('libro-conocimiento');
-      if (modeloBase) {
-        const clon = modeloBase.clone();
-        clon.position.set(libro.posicion.x, libro.posicion.y, libro.posicion.z);
-        renderEngine.registrarModelo(clon);
-        libro._objeto3D = clon;
-      }
+      // Crear libro 3D personalizado según la habilidad (Python azul, JS amarillo, SQL cian)
+      // usando el nuevo método crearLibroConocimiento3D() de AssetLoader que genera
+      // geometría procedural detallada con portada, páginas y lomo.
+      const modeloLibro = assetLoader.crearLibroConocimiento3D(libro.habilidadId);
+      modeloLibro.position.set(libro.posicion.x, libro.posicion.y, libro.posicion.z);
+      renderEngine.registrarModelo(modeloLibro);
+      libro._objeto3D = modeloLibro;
     }
 
     /**
@@ -543,7 +543,69 @@ export async function iniciarJuego(dependencias = {}) {
       // --- Interfaz: mantener el overlay HTML/CSS actualizado ---
       uiSystem.renderizarEnDOM(contenedorOverlay, progreso, Date.now());
 
-      // --- Detectar Victoria (Desafío Final completado) ---
+      // --- Activar Portal de Restauración cuando se tienen las 3 habilidades ---
+      if (renderEngine._portalRestauracion && renderEngine._portalRestauracion.userData.portalInterior) {
+        const tiene3Habilidades = progreso.tieneHabilidad('python') && 
+                                  progreso.tieneHabilidad('javascript') && 
+                                  progreso.tieneHabilidad('sql');
+        
+        const portalInterior = renderEngine._portalRestauracion.userData.portalInterior;
+        
+        if (tiene3Habilidades) {
+          // Portal activo: máxima intensidad emisiva y opacidad completa
+          portalInterior.material.emissiveIntensity = 2.0;
+          portalInterior.material.opacity = 1.0;
+        } else {
+          // Portal inactivo: intensidad baja
+          portalInterior.material.emissiveIntensity = 0.3;
+          portalInterior.material.opacity = 0.7;
+        }
+      }
+
+      // --- Detectar entrada al Portal (Victoria Final por contacto con portal) ---
+      if (renderEngine._portalRestauracion && !estado.juegoPausado) {
+        const tiene3Habilidades = progreso.tieneHabilidad('python') && 
+                                  progreso.tieneHabilidad('javascript') && 
+                                  progreso.tieneHabilidad('sql');
+        
+        if (tiene3Habilidades) {
+          // Calcular distancia entre Codi y el portal
+          const posPortal = renderEngine._portalRestauracion.position;
+          const posCodi = estado.codiPose.position;
+          const distanciaAlPortal = Math.sqrt(
+            Math.pow(posCodi.x - posPortal.x, 2) +
+            Math.pow(posCodi.z - posPortal.z, 2)
+          );
+          
+          // Radio de colisión del portal (ancho del arco / 2)
+          const radioPortal = 2.5;
+          
+          if (distanciaAlPortal < radioPortal) {
+            // ¡Codi ha entrado al portal! → Victoria Final con celebración
+            estado.juegoPausado = true;
+            
+            // Reproducir fanfarria de victoria
+            uiSystem.reproducirSonidoVictoria();
+            
+            // Generar confeti en pantalla
+            uiSystem.mostrarConfeti(contenedorOverlay);
+            
+            // Mostrar mensaje emotivo de celebración
+            uiSystem.mostrarMensaje(
+              '¡FELICIDADES CODI! ¡NOS SALVASTE! Gracias a ti, la Biblioteca Perdida y todos los lenguajes de programación han sido restaurados.',
+              10000,
+              Date.now()
+            );
+            
+            // Marcar desafío como completado para mostrar panel de victoria
+            if (!progreso.desafioCompletado()) {
+              progreso.marcarDesafioCompletado();
+            }
+          }
+        }
+      }
+
+      // --- Detectar Victoria (Desafío Final completado o entrada al Portal) ---
       if (progreso.desafioCompletado() && !estado.juegoPausado) {
         estado.juegoPausado = true;
         // H03: Reproducir sonido de Victoria
@@ -561,7 +623,22 @@ export async function iniciarJuego(dependencias = {}) {
       uiSystem.renderizarEnDOM(contenedorOverlay, progreso, Date.now());
     });
 
-    // --- 9. Arrancar el bucle de juego ---
+    // --- 9. Mostrar Terminal de Inicio (solo en navegador real, no en tests) ---
+    // En entorno de test (cuando se inyectan dependencias), saltamos la terminal
+    // para no bloquear los tests automatizados.
+    const esEntornoTest = Boolean(dependencias.RenderEngineClase || dependencias.document);
+    
+    if (!esEntornoTest) {
+      estado.juegoPausado = true; // Pausar el juego inicialmente
+      
+      uiSystem.mostrarTerminalInicio(contenedorOverlay, () => {
+        // Callback al hacer clic en "Comenzar Misión"
+        estado.juegoPausado = false; // Desbloquear el juego
+        uiSystem.mostrarMensaje('¡Bienvenido a la Isla, Codi! Comienza tu aventura.', 4000, Date.now());
+      });
+    }
+
+    // --- 10. Arrancar el bucle de juego ---
     gameLoop.start();
 
     // --- Event listener para botón de reinicio (solo si se mostró Victoria) ---
@@ -583,10 +660,37 @@ export async function iniciarJuego(dependencias = {}) {
           mecanismo.estado = mecanismosDeclarativos[index].estado;
         });
         
-        // Restaurar libros a su estado original (no absorbidos)
+        // Restaurar libros a su estado original (no absorbidos) y hacer visibles sus objetos 3D
         estado.librosActivos.forEach((libro, index) => {
           libro.absorbido = librosDeclarativos[index].absorbido;
+          // Hacer visible el objeto 3D si estaba oculto tras ser absorbido
+          if (libro._objeto3D) {
+            libro._objeto3D.visible = true;
+          }
         });
+        
+        // Reiniciar posición de Codi y cámara
+        const posicionInicial = calcularPosicionInicioCodi(primeraZona);
+        estado.codiPose = {
+          position: posicionInicial,
+          rotationY: 0,
+          velocity: { x: 0, y: 0, z: 0 },
+          animState: 'idle',
+          lastSafePosition: { ...posicionInicial },
+        };
+        
+        // Reiniciar estado de cámara para evitar posiciones extrañas
+        estado.cameraState = {
+          yaw: 0,
+          pitch: 0,
+          distanciaActual: distanciaCamaraInicial,
+          posicionCamara: {
+            x: posicionInicial.x,
+            y: posicionInicial.y + 3,
+            z: posicionInicial.z + distanciaCamaraInicial,
+          },
+          target: { ...posicionInicial },
+        };
         
         // Ocultar modal de Victoria
         uiSystem.renderizarEnDOM(contenedorOverlay, progreso, Date.now());
@@ -654,12 +758,16 @@ export async function iniciarJuego(dependencias = {}) {
           mecanismo.estado = mecanismosDeclarativos[index].estado;
         });
         
-        // Restaurar libros a su estado original (no absorbidos)
+        // Restaurar libros a su estado original (no absorbidos) y hacer visibles sus objetos 3D
         estado.librosActivos.forEach((libro, index) => {
           libro.absorbido = librosDeclarativos[index].absorbido;
+          // Hacer visible el objeto 3D si estaba oculto tras ser absorbido
+          if (libro._objeto3D) {
+            libro._objeto3D.visible = true;
+          }
         });
         
-        // Reiniciar posición de Codi
+        // Reiniciar posición de Codi y cámara
         const posicionInicial = calcularPosicionInicioCodi(primeraZona);
         estado.codiPose = {
           position: posicionInicial,
@@ -667,6 +775,19 @@ export async function iniciarJuego(dependencias = {}) {
           velocity: { x: 0, y: 0, z: 0 },
           animState: 'idle',
           lastSafePosition: { ...posicionInicial },
+        };
+        
+        // Reiniciar estado de cámara para evitar posiciones extrañas
+        estado.cameraState = {
+          yaw: 0,
+          pitch: 0,
+          distanciaActual: distanciaCamaraInicial,
+          posicionCamara: {
+            x: posicionInicial.x,
+            y: posicionInicial.y + 3,
+            z: posicionInicial.z + distanciaCamaraInicial,
+          },
+          target: { ...posicionInicial },
         };
         
         uiSystem.mostrarMensaje('⚡ Demo reiniciada', 2000, Date.now());

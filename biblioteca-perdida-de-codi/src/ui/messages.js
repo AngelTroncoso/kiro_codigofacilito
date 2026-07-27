@@ -59,11 +59,26 @@ function descripcionUsoPorId(habilidadId) {
 
 /**
  * Mensaje contextual de absorción de una Habilidad (Requisito 3.3).
+ * Incluye mensajes narrativos especiales de gratitud para cada lenguaje.
  * @param {{ habilidadId: string, nombreHabilidad?: string, descripcionUso?: string }} evento
  * @returns {string}
  */
 function mensajeAbsorcion(evento) {
   const nombre = evento.nombreHabilidad ?? nombreHabilidadPorId(evento.habilidadId);
+  
+  // Mensajes narrativos especiales de gratitud por lenguaje
+  const MENSAJES_ESPECIALES = {
+    python: '¡Increíble Codi! Has recuperado el Lenguaje de la Lógica y los Datos: Python. Con él, los sistemas de la Biblioteca volverán a procesar información.',
+    javascript: '¡Gran trabajo Codi! Has restaurado el Lenguaje de la Interactividad: JavaScript. La Biblioteca vuelve a tener vida y movimiento.',
+    sql: '¡Excelente Codi! Has rescatado el Lenguaje de la Memoria: SQL. Todos los registros y ancestros del conocimiento han sido salvados.',
+  };
+
+  // Si existe un mensaje especial para esta habilidad, usarlo
+  if (MENSAJES_ESPECIALES[evento.habilidadId]) {
+    return MENSAJES_ESPECIALES[evento.habilidadId];
+  }
+
+  // Fallback a los mensajes originales
   if (evento.descripcionUso) {
     return `¡Has absorbido ${nombre}! ${evento.descripcionUso}`;
   }
