@@ -64,6 +64,25 @@ import { UISystem } from './ui/UISystem.js';
 import { generarMensaje, generarMensajeCarenciaAdapter, generarMensajeExitoAdapter } from './ui/messages.js';
 import { FinalChallenge, ZONA_DESAFIO_FINAL_ID } from './challenge/FinalChallenge.js';
 
+/**
+ * Color de acento por Habilidad, usado ÚNICAMENTE para pasarlo como
+ * `colorHex` a `renderEngine.registrarElementoInteractivo` (SPEC-05:
+ * Interactive Feedback & Game Feel). Es una copia deliberadamente local a
+ * `main.js` del mismo mapa que `RenderEngine.js` ya usa internamente para
+ * el "Ability Acquisition Feedback": mantenerlos como dos constantes
+ * independientes (en vez de que `RenderEngine` exporte la suya) preserva
+ * el desacoplamiento — `main.js` (que sí conoce `HabilidadId` como
+ * concepto de gameplay) decide qué color le corresponde a cada
+ * Mecanismo_Ambiental según su `habilidadRequerida`, y `RenderEngine` solo
+ * recibe un número hexadecimal ya resuelto, sin necesitar importar ni
+ * entender `WorldModel.js`/`catalogoHabilidades.js`.
+ */
+const COLOR_POR_HABILIDAD_FEEDBACK = {
+  python: 0xfbbf24,
+  javascript: 0x38bdf8,
+  sql: 0xa855f7,
+};
+
 /** Radio (unidades del mundo) dentro del cual se considera que Codi puede interactuar con un Mecanismo_Ambiental cercano. */
 const RADIO_INTERACCION_MECANISMO = 2.5;
 
@@ -384,6 +403,23 @@ export async function iniciarJuego(dependencias = {}) {
         clon.position.set(mecanismo.posicion.x, mecanismo.posicion.y, mecanismo.posicion.z);
         renderEngine.registrarModelo(clon);
         mecanismo._objeto3D = clon;
+
+        // Feedback visual (SPEC-05): registra el clon como "elemento
+        // interactivo" para que reciba el pulso de brillo sutil constante
+        // (sección 2) y la transición de activación al resolverse
+        // (sección 3). `renderEngine.registrarElementoInteractivo` NO
+        // recibe `mecanismo` completo ni `progreso`/`abilitySystem` — solo
+        // el objeto 3D, un color derivado de su Habilidad, y una función
+        // de solo lectura que expone `mecanismo.estado` en el momento en
+        // que `RenderEngine` la invoque cada frame (mantiene a
+        // `RenderEngine` sin conocer `MecanismoAmbiental` como tipo).
+        // Se invoca con `?.` porque es un método opcional/nuevo (SPEC-05):
+        // cualquier `RenderEngineClase` inyectada (p.ej. mocks de tests
+        // preexistentes) que no lo implemente sigue funcionando sin cambios.
+        renderEngine.registrarElementoInteractivo?.(clon, {
+          colorHex: COLOR_POR_HABILIDAD_FEEDBACK[mecanismo.habilidadRequerida],
+          leerEstado: () => mecanismo.estado,
+        });
       }
     }
 
@@ -479,7 +515,13 @@ export async function iniciarJuego(dependencias = {}) {
       }
 
       // --- Renderizado del frame ---
-      renderEngine.render(estado.codiPose, estado.cameraState);
+      // Tercer argumento opcional añadido en SPEC-05 (Interactive
+      // Feedback & Game Feel): permite que RenderEngine detecte
+      // internamente cuándo `progreso.habilidades()` creció respecto al
+      // frame anterior, para disparar el "Ability Acquisition Feedback"
+      // (destello + partículas sobre Codi). No cambia ninguna otra
+      // llamada existente ni ningún comportamiento de `progreso` en sí.
+      renderEngine.render(estado.codiPose, estado.cameraState, progreso);
 
       // --- Interfaz: mantener el overlay HTML/CSS actualizado ---
       uiSystem.renderizarEnDOM(contenedorOverlay, progreso, Date.now());

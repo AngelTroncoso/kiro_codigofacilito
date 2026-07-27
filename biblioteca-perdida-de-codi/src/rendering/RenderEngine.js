@@ -5,6 +5,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { actualizarAspecto } from '../camera/CameraSystem.js';
 import { aplicarShaderCorrupcion } from './corruptionShader.js';
+import { AmbientLifeController } from './AmbientLifeController.js';
 
 /**
  * Detecta si el navegador actual soporta WebGL (1 o 2), sin necesidad de
@@ -55,6 +56,39 @@ const ANCHO_VOLUMEN_PARTICULAS = 18;
  * a la base (ciclo infinito sin crecer memoria).
  */
 const ALTO_VOLUMEN_PARTICULAS = 5;
+
+/**
+ * Mapa de color por Habilidad — "Knowledge Energy System" (SPEC-05:
+ * Interactive Feedback & Game Feel, sección 4). Única fuente de verdad de
+ * qué color visual representa cada Habilidad en TODO efecto relacionado
+ * con conocimiento (destellos de absorción, partículas de activación,
+ * halo de elementos interactivos): así "conocimiento de Python" se ve/
+ * siente igual en cualquier lugar donde aparezca, en vez de tener un
+ * efecto distinto por concepto equivalente. Coincide con los acentos ya
+ * establecidos en docs/art-direction.md sección 5.2/6 y ya usados en otras
+ * piezas del proyecto (p.ej. los cristales/glifos de
+ * `_crearDetallesAmbientales`).
+ */
+const HABILIDAD_COLORES = {
+  python: 0xfbbf24,
+  javascript: 0x38bdf8,
+  sql: 0xa855f7,
+};
+
+/**
+ * Color neutro de "conocimiento" sin Habilidad asociada, reutilizado por
+ * elementos interactivos registrados sin `habilidadId` conocido. Mismo
+ * tono ya usado por las Partículas Ambientales (SPEC-03).
+ */
+const COLOR_CONOCIMIENTO_NEUTRO = 0x9fd8e8;
+
+/**
+ * Ritmo único (rad/s) de "respiración luminosa" reutilizado por TODOS los
+ * elementos interactivos registrados (SPEC-05 secciones 2 y 4: mismo
+ * ritmo de animación para conceptos equivalentes, en vez de un valor
+ * distinto por instancia).
+ */
+const RITMO_RESPIRACION_CONOCIMIENTO = 2.4;
 
 /**
  * Vertex/fragment shader mínimo del "Sky Gradient" procedural (SPEC-03:
@@ -398,6 +432,61 @@ export class RenderEngine {
     };
 
     /**
+     * @private - lista de "estallidos de energía de conocimiento" activos
+     * (SPEC-05 sección 1, "Ability Acquisition Feedback"): cada uno es un
+     * pequeño sistema de partículas efímero (`THREE.Points`) que se
+     * expande y se desvanece durante `DURACION_ESTALLIDO_S` segundos antes
+     * de removerse a sí mismo de la escena. Se disparan al detectar (vía
+     * `render(poseCodi, estadoCamara, progreso)`) que `progreso.habilidades()`
+     * creció respecto al frame anterior — ver `_detectarNuevasHabilidades`.
+     * @type {Array<{ puntos: import('three').Points, edadSegundos: number }>}
+     */
+    this._estallidosConocimiento = [];
+
+    /**
+     * @private - snapshot de los ids de Habilidad ya observados en
+     * `progreso.habilidades()` en el frame anterior (SPEC-05 sección 1).
+     * `null` hasta el primer frame en el que se recibe un `progreso` válido,
+     * para no disparar un "estallido" falso interpretando el estado inicial
+     * (que puede llegar con Habilidades ya otorgadas, p.ej. en un test) como
+     * "recién obtenidas".
+     * @type {Set<string>|null}
+     */
+    this._habilidadesConocidasAnteriores = null;
+
+    /**
+     * @private - lista de elementos interactivos registrados vía
+     * `registrarElementoInteractivo` (SPEC-05 secciones 2 y 3): cada
+     * entrada guarda solo la información visual mínima necesaria (el
+     * objeto 3D, un color de acento, y el último `estado`/'resuelto'
+     * observado) para animar el "pulso de brillo"/transición de
+     * activación — nunca una referencia al `MecanismoAmbiental` completo
+     * ni a `ProgressStore`/`AbilitySystem` (ver JSDoc del método).
+     * @type {Array<{ objeto3D: import('three').Object3D, colorHex: number, estadoAnterior: string, faseActivacion: number }>}
+     */
+    this._elementosInteractivos = [];
+
+    /**
+     * @private - estado de "Camera Micro Feedback" (SPEC-05 sección 5):
+     * un offset aditivo temporal (unidades del mundo, eje Y) aplicado
+     * SOLO a la posición final de la cámara ya calculada por
+     * `estadoCamara` — nunca se modifica `CameraSystem` ni su lógica de
+     * órbita/colisión, este offset es una capa puramente presentacional
+     * superpuesta en `render()`. Se amortigua exponencialmente hacia 0
+     * cada frame, igual que `offsetLatigazoCola` de SPEC-04.
+     * @type {number}
+     */
+    this._offsetMicroFeedbackCamara = 0;
+
+    /**
+     * @private - `true` si Codi estaba en el aire (`animState === 'jump'`)
+     * en el frame anterior, usado para detectar la transición "acaba de
+     * aterrizar" que dispara la micro-amortiguación de cámara (sección 5).
+     * @type {boolean}
+     */
+    this._enElAireAnterior = false;
+
+    /**
      * @private - sistema de Partículas Ambientales ("motas de conocimiento",
      * docs/art-direction.md sección 15): un único `THREE.Points` liviano
      * (una sola geometría/draw call) que orbita alrededor de Codi, dando
@@ -410,11 +499,27 @@ export class RenderEngine {
     /**
      * @private - detalles ambientales estáticos de "Environmental
      * Storytelling" (SPEC-03 sección 7): ver `_crearDetallesAmbientales`.
-     * No animados, no interactivos, no registrados en ningún sistema de
-     * gameplay/colisión.
+     * No interactivos, no registrados en ningún sistema de gameplay/
+     * colisión. Desde SPEC-06 ya no son completamente estáticos: sus
+     * mallas de cristales/glifos son animadas cada frame por
+     * `this._vidaAmbiental` (ver más abajo), pero la responsabilidad de
+     * CREARLAS sigue siendo de este método/`RenderEngine`.
      */
-    this._detallesAmbientales = this._crearDetallesAmbientales();
+    const { grupo: detallesAmbientales, cristales, glifos } = this._crearDetallesAmbientales();
+    this._detallesAmbientales = detallesAmbientales;
     this._scene.add(this._detallesAmbientales);
+
+    /**
+     * @private - "Ambient Life Controller" (SPEC-06: Living World —
+     * Ambient Life System, sección 1): coordina exclusivamente la
+     * animación de los Cristales de Conocimiento y Glifos Antiguos
+     * recién creados (flotación, rotación, respiración luminosa, ondas de
+     * energía, y las Idle World Variations de la sección 7). Ver
+     * `AmbientLifeController.js` para el detalle de desacoplamiento
+     * respecto al gameplay.
+     * @type {AmbientLifeController}
+     */
+    this._vidaAmbiental = new AmbientLifeController({ cristales, glifos });
 
     /**
      * @private - cadena de postprocesado opcional (docs/art-direction.md
@@ -491,15 +596,30 @@ export class RenderEngine {
    * `zones.data.js` directamente (se usan coordenadas fijas razonables en
    * vez de una dependencia cruzada con el módulo de datos del mundo).
    *
+   * Desde SPEC-06 (Living World — Ambient Life System), cada cristal/
+   * glifo recibe su propio material CLONADO (en vez de compartir un único
+   * material por categoría, como en la versión original de SPEC-03), para
+   * que `AmbientLifeController` pueda animar el `emissiveIntensity` de
+   * cada instancia de forma independiente. La geometría sigue siendo
+   * compartida entre instancias de la misma categoría (sin costo de
+   * memoria adicional relevante).
+   *
    * @private
-   * @returns {THREE.Group}
+   * @returns {{ grupo: THREE.Group, cristales: THREE.Mesh[], glifos: THREE.Mesh[] }}
    */
   _crearDetallesAmbientales() {
     const grupo = new THREE.Group();
+    const cristales = [];
+    const glifos = [];
 
     // Cristales de conocimiento: prismas pequeños con bioluminiscencia
-    // discreta (emissive bajo), flotando a distintas alturas.
-    const materialCristal = new THREE.MeshStandardMaterial({
+    // discreta (emissive bajo), flotando a distintas alturas. La
+    // geometría se comparte entre instancias (idéntica en las tres), pero
+    // el MATERIAL se clona por instancia (SPEC-06: Ambient Life System)
+    // para que `AmbientLifeController` pueda variar `emissiveIntensity`
+    // de cada cristal de forma independiente sin afectar a los demás.
+    const geometriaCristal = new THREE.OctahedronGeometry(0.22, 0);
+    const materialCristalBase = new THREE.MeshStandardMaterial({
       color: 0x38bdf8,
       emissive: 0x38bdf8,
       emissiveIntensity: 0.35,
@@ -514,16 +634,19 @@ export class RenderEngine {
       { x: -3, y: 1.3, z: 6 },
     ];
     for (const pos of posicionesCristales) {
-      const cristal = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), materialCristal);
+      const cristal = new THREE.Mesh(geometriaCristal, materialCristalBase.clone());
       cristal.position.set(pos.x, pos.y, pos.z);
       cristal.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
       grupo.add(cristal);
+      cristales.push(cristal);
     }
 
     // Glifos antiguos: anillos delgados grabados "flotando" cerca del
     // suelo, sugiriendo símbolos de un lenguaje olvidado (sin texto
-    // literal ni tipografía, para no competir con el HUD real).
-    const materialGlifo = new THREE.MeshStandardMaterial({
+    // literal ni tipografía, para no competir con el HUD real). Mismo
+    // criterio de geometría compartida + material clonado por instancia.
+    const geometriaGlifo = new THREE.RingGeometry(0.3, 0.38, 6);
+    const materialGlifoBase = new THREE.MeshStandardMaterial({
       color: 0xfbbf24,
       emissive: 0xfbbf24,
       emissiveIntensity: 0.25,
@@ -535,13 +658,14 @@ export class RenderEngine {
       { x: 4, y: 0.05, z: -5 },
     ];
     for (const pos of posicionesGlifos) {
-      const glifo = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.38, 6), materialGlifo);
+      const glifo = new THREE.Mesh(geometriaGlifo, materialGlifoBase.clone());
       glifo.rotation.x = -Math.PI / 2;
       glifo.position.set(pos.x, pos.y, pos.z);
       grupo.add(glifo);
+      glifos.push(glifo);
     }
 
-    return grupo;
+    return { grupo, cristales, glifos };
   }
 
   /**
@@ -586,21 +710,54 @@ export class RenderEngine {
   _crearParticulasAmbientales() {
     const cantidad = 40;
     const posiciones = new Float32Array(cantidad * 3);
+    const tamanos = new Float32Array(cantidad);
     // Fase/velocidad de ascenso individual por partícula, para que no
     // todas suban en sincronía perfecta (ver `_actualizarParticulasAmbientales`).
     const fases = new Float32Array(cantidad);
     const velocidades = new Float32Array(cantidad);
+    // SPEC-06 (Ambient Dust Evolution, sección 5): fase/velocidad/amplitud
+    // individuales de turbulencia lateral (drift en X/Z independiente del
+    // ascenso en Y), y un factor de "profundidad" por partícula que
+    // combina tamaño y opacidad para sugerir que algunas motas están más
+    // cerca de la cámara que otras — sin aumentar la cantidad de
+    // partículas ni el número de draw calls (sigue siendo un único
+    // `THREE.Points`).
+    const faseTurbulencia = new Float32Array(cantidad);
+    const velocidadTurbulencia = new Float32Array(cantidad);
+    const amplitudTurbulencia = new Float32Array(cantidad);
+    const profundidad = new Float32Array(cantidad);
 
     for (let i = 0; i < cantidad; i += 1) {
       posiciones[i * 3] = (Math.random() - 0.5) * ANCHO_VOLUMEN_PARTICULAS;
       posiciones[i * 3 + 1] = Math.random() * ALTO_VOLUMEN_PARTICULAS;
       posiciones[i * 3 + 2] = (Math.random() - 0.5) * ANCHO_VOLUMEN_PARTICULAS;
       fases[i] = Math.random() * Math.PI * 2;
-      velocidades[i] = 0.15 + Math.random() * 0.15;
+      // Rango de velocidad de ascenso ampliado respecto a la versión
+      // original de SPEC-03 (0.15-0.30 -> 0.10-0.35) para una variación de
+      // velocidad más perceptible entre partículas individuales.
+      velocidades[i] = 0.1 + Math.random() * 0.25;
+      faseTurbulencia[i] = Math.random() * Math.PI * 2;
+      velocidadTurbulencia[i] = 0.3 + Math.random() * 0.5;
+      amplitudTurbulencia[i] = 0.15 + Math.random() * 0.35;
+      // 0 = más lejos (más pequeña/tenue), 1 = más cerca (más grande/visible).
+      profundidad[i] = Math.random();
+      tamanos[i] = 0.04 + profundidad[i] * 0.06;
     }
 
     const geometria = new THREE.BufferGeometry();
     geometria.setAttribute('position', new THREE.BufferAttribute(posiciones, 3));
+    // Atributo de tamaño por vértice: requiere un `onBeforeCompile` o un
+    // `ShaderMaterial` custom para afectar realmente el tamaño de render
+    // en `PointsMaterial` estándar (que solo soporta un `size` uniforme).
+    // Para mantener esta mejora simple, ligera y sin nuevas dependencias
+    // (Production Readiness: no aumentar deuda técnica con un shader
+    // adicional), la variación de tamaño/profundidad se aplica en su
+    // lugar variando `material.size` de forma GLOBAL y sutil en cada
+    // frame (ver `_actualizarParticulasAmbientales`), mientras que
+    // `tamanos`/`profundidad` quedan disponibles en `userData` para una
+    // futura Specification que sí justifique el costo de un
+    // `ShaderMaterial` por-vértice (ver recomendación en el informe).
+    geometria.setAttribute('particleSize', new THREE.BufferAttribute(tamanos, 1));
 
     const material = new THREE.PointsMaterial({
       color: 0x9fd8e8, // mezcla neutra cian/ámbar, ver JSDoc de este método
@@ -614,6 +771,11 @@ export class RenderEngine {
     const puntos = new THREE.Points(geometria, material);
     puntos.userData.fases = fases;
     puntos.userData.velocidades = velocidades;
+    puntos.userData.faseTurbulencia = faseTurbulencia;
+    puntos.userData.velocidadTurbulencia = velocidadTurbulencia;
+    puntos.userData.amplitudTurbulencia = amplitudTurbulencia;
+    puntos.userData.profundidad = profundidad;
+    puntos.userData.tamanoBaseGlobal = 0.06;
     return puntos;
   }
 
@@ -793,12 +955,41 @@ export class RenderEngine {
    *   orientar el modelo 3D de Codi si se registró uno.
    * @param {{posicionCamara: {x:number,y:number,z:number}, target: {x:number,y:number,z:number}}} [estadoCamara] -
    *   Estado de cámara producido por `CameraSystem.actualizar`.
+   * @param {{habilidades: () => Set<string>}} [progreso] - **Parámetro
+   *   opcional añadido en SPEC-05 (Interactive Feedback & Game Feel),
+   *   retrocompatible: el comportamiento con 2 argumentos es idéntico al
+   *   de antes de esta opción.** Se acepta cualquier objeto compatible con
+   *   `ProgressStore` que expone `habilidades()` (duck typing, igual que
+   *   el resto de esta clase) — `RenderEngine` únicamente LEE el conjunto
+   *   de ids de Habilidad ya obtenidas para detectar, comparando frame a
+   *   frame, cuándo aparece una nueva y disparar el "Ability Acquisition
+   *   Feedback" (destello + partículas sobre Codi, sección 1). No conoce
+   *   ninguna otra API de `ProgressStore`, no la muta, y no depende de
+   *   `AbilitySystem`/`MovementSystem`/ninguna regla de gameplay: es
+   *   exactamente la misma frontera de responsabilidad que ya usa
+   *   `poseCodi.velocity`/`animState` para el resto de animaciones
+   *   presentacionales de esta clase (SPEC-04). Si se omite, esta mejora
+   *   simplemente no se activa (no-op), preservando el comportamiento
+   *   previo a SPEC-05.
    * @returns {void}
    */
-  render(poseCodi, estadoCamara) {
+  render(poseCodi, estadoCamara, progreso) {
+    // El reloj interno y el "Camera Micro Feedback" (SPEC-05 sección 5) se
+    // actualizan ANTES de posicionar la cámara (en vez de al final del
+    // método, como el resto de animaciones) para que un evento detectado
+    // en ESTE frame (aterrizaje, nueva Habilidad) se refleje en la
+    // posición de cámara de este mismo frame, no con un frame de retraso.
+    const deltaSegundos = this._avanzarRelojInterno();
+    this._detectarNuevasHabilidades(progreso, poseCodi);
+    this._actualizarMicroFeedbackCamara(poseCodi, deltaSegundos);
+
     if (estadoCamara) {
       const { posicionCamara, target } = estadoCamara;
-      this._camera.position.set(posicionCamara.x, posicionCamara.y, posicionCamara.z);
+      this._camera.position.set(
+        posicionCamara.x,
+        posicionCamara.y + this._offsetMicroFeedbackCamara,
+        posicionCamara.z
+      );
       this._camera.lookAt(target.x, target.y, target.z);
     }
 
@@ -826,11 +1017,13 @@ export class RenderEngine {
       this._particulasAmbientales.position.set(position.x, 0, position.z);
     }
 
-    const deltaSegundos = this._avanzarRelojInterno();
     this._actualizarCorrupcionesActivas(deltaSegundos);
     this._actualizarCicloCaminata(poseCodi, deltaSegundos);
     this._actualizarParticulasAmbientales(deltaSegundos);
     this._actualizarPersonalidadCodi(poseCodi, deltaSegundos);
+    this._actualizarFeedbackInteractivo(deltaSegundos);
+    this._actualizarEstallidosConocimiento(deltaSegundos);
+    this._vidaAmbiental.actualizar(deltaSegundos, this._estaCodiQuieto(poseCodi));
 
     if (this._composer) {
       this._composer.render(deltaSegundos);
@@ -860,20 +1053,61 @@ export class RenderEngine {
 
     const geometria = this._particulasAmbientales.geometry;
     const posiciones = geometria.attributes.position.array;
-    const { velocidades } = this._particulasAmbientales.userData;
+    const {
+      velocidades,
+      faseTurbulencia,
+      velocidadTurbulencia,
+      amplitudTurbulencia,
+      profundidad,
+      tamanoBaseGlobal,
+    } = this._particulasAmbientales.userData;
+
+    // SPEC-06 (Ambient Dust Evolution, sección 5): reutiliza el mismo
+    // reloj del Ambient Life Controller (`obtenerTiempoTotal`) en vez de
+    // mantener un segundo acumulador de tiempo redundante (Consistency
+    // Pass, evitar duplicación) para calcular la turbulencia lateral.
+    const tiempoTotal = this._vidaAmbiental.obtenerTiempoTotal();
 
     for (let i = 0; i < velocidades.length; i += 1) {
+      const indiceX = i * 3;
       const indiceY = i * 3 + 1;
+      const indiceZ = i * 3 + 2;
+
       posiciones[indiceY] += velocidades[i] * deltaSegundos;
+
+      // Turbulencia: pequeño drift lateral oscilante en X/Z, independiente
+      // del ascenso vertical, para que el movimiento nunca se lea como
+      // "línea recta perfecta hacia arriba" (más orgánico, sin física real).
+      const desplazamientoTurbulencia =
+        Math.sin(tiempoTotal * velocidadTurbulencia[i] + faseTurbulencia[i]) * amplitudTurbulencia[i] * deltaSegundos;
+      posiciones[indiceX] += desplazamientoTurbulencia;
+      posiciones[indiceZ] +=
+        Math.cos(tiempoTotal * velocidadTurbulencia[i] + faseTurbulencia[i]) * amplitudTurbulencia[i] * deltaSegundos;
 
       if (posiciones[indiceY] > ALTO_VOLUMEN_PARTICULAS) {
         posiciones[indiceY] = 0;
-        posiciones[i * 3] = (Math.random() - 0.5) * ANCHO_VOLUMEN_PARTICULAS;
-        posiciones[i * 3 + 2] = (Math.random() - 0.5) * ANCHO_VOLUMEN_PARTICULAS;
+        posiciones[indiceX] = (Math.random() - 0.5) * ANCHO_VOLUMEN_PARTICULAS;
+        posiciones[indiceZ] = (Math.random() - 0.5) * ANCHO_VOLUMEN_PARTICULAS;
       }
     }
 
     geometria.attributes.position.needsUpdate = true;
+
+    // Variación de "profundidad" (sección 5): el tamaño GLOBAL del
+    // material oscila muy sutilmente (no por partícula individual, ver
+    // JSDoc de `_crearParticulasAmbientales` sobre la limitación de
+    // `PointsMaterial`), promediando el factor de profundidad de todas
+    // las partículas para dar una sensación leve de "unas más cerca, otras
+    // más lejos" sin requerir un shader custom adicional.
+    if (profundidad && profundidad.length > 0) {
+      let sumaProfundidad = 0;
+      for (let i = 0; i < profundidad.length; i += 1) {
+        sumaProfundidad += profundidad[i];
+      }
+      const profundidadPromedio = sumaProfundidad / profundidad.length;
+      const oscilacionTamano = Math.sin(tiempoTotal * 0.15) * 0.01;
+      this._particulasAmbientales.material.size = tamanoBaseGlobal + profundidadPromedio * 0.03 + oscilacionTamano;
+    }
   }
 
   /**
@@ -993,6 +1227,30 @@ export class RenderEngine {
   }
 
   /**
+   * Determina si Codi está "quieto" para efectos puramente presentacionales
+   * (SPEC-04: parpadeo/mirada ambiental/inclinación de cabeza; SPEC-06:
+   * Idle World Variations del entorno): sin desplazamiento horizontal
+   * relevante Y sin estar en el aire (`animState === 'jump'`) — un salto
+   * no debe disparar ninguna de estas animaciones de quietud (no deben
+   * leerse como reacción a saltar). Extraído como método compartido para
+   * que SPEC-06 reutilice exactamente el mismo criterio ya usado por
+   * SPEC-04 en vez de duplicar la lógica (Consistency Pass / Production
+   * Readiness: evitar duplicación de código).
+   *
+   * @private
+   * @param {import('../movement/MovementSystem.js').CodiPose} [poseCodi]
+   * @returns {boolean}
+   */
+  _estaCodiQuieto(poseCodi) {
+    const velocidad = poseCodi?.velocity;
+    const velocidadHorizontal = velocidad
+      ? Math.sqrt(velocidad.x * velocidad.x + velocidad.z * velocidad.z)
+      : 0;
+    const enElAire = poseCodi?.animState === 'jump';
+    return velocidadHorizontal <= 1e-3 && !enElAire;
+  }
+
+  /**
    * Orquesta toda la "personalidad" puramente visual de Codi añadida por
    * SPEC-04 (Character Polish): respiración/balanceo en idle, parpadeo,
    * micro-movimientos de mirada, dinámica de cola por inercia, y la pose
@@ -1019,17 +1277,11 @@ export class RenderEngine {
       return;
     }
 
+    const quieto = this._estaCodiQuieto(poseCodi);
     const velocidad = poseCodi?.velocity;
     const velocidadHorizontal = velocidad
       ? Math.sqrt(velocidad.x * velocidad.x + velocidad.z * velocidad.z)
       : 0;
-    // "Quieto" para efectos de personalidad = sin desplazamiento horizontal
-    // Y sin estar en el aire (animState 'jump'); un salto no debe disparar
-    // parpadeo/mirada ambiental/inclinación de cabeza (Principio de Game
-    // Feel: estas animaciones nunca deben leerse como reacción a saltar).
-    const enElAire = poseCodi?.animState === 'jump';
-    const quieto = velocidadHorizontal <= 1e-3 && !enElAire;
-
     const estado = this._estadoPersonalidadCodi;
 
     this._actualizarRespiracionIdle(partesAnimables, estado, quieto, deltaSegundos);
@@ -1282,6 +1534,386 @@ export class RenderEngine {
   }
 
   /**
+   * Registra (opt-in, opcional) un objeto 3D del entorno como "elemento
+   * interactivo" para que reciba el feedback visual genérico de SPEC-05
+   * (secciones 2 y 3: "Interactive Object Feedback" / "Platform Activation
+   * Feedback"): un pulso de brillo sutil constante mientras está
+   * `'bloqueado'`, y una transición suave (destello + disipación) al pasar
+   * a `'resuelto'`.
+   *
+   * DISEÑO DE DESACOPLAMIENTO (condición explícita del usuario): este
+   * método NO recibe ni conoce un `MecanismoAmbiental` completo, un
+   * `ProgressStore` ni ninguna regla de `AbilitySystem`. Solo recibe la
+   * información visual mínima e inmutable necesaria para animar el
+   * feedback — el objeto 3D a animar, un `colorHex` (típicamente derivado
+   * de `HABILIDAD_COLORES` por quien registra, ver `main.js`) y una
+   * función `leerEstado()` de solo lectura que `RenderEngine` invoca cada
+   * frame para saber si debe animar la transición de activación. Esto es
+   * intencional: `RenderEngine` sigue sin importar `WorldModel.js` ni
+   * ningún tipo de `MecanismoAmbiental`, preservando el mismo
+   * desacoplamiento que ya existe entre esta clase y el resto del
+   * gameplay (ver `registrarCodi`, que tampoco conoce `CodiPose` como
+   * tipo, solo como forma de datos).
+   *
+   * Idempotente en el sentido de que registrar el mismo `objeto3D` dos
+   * veces simplemente añade una segunda entrada (no se deduplica por
+   * identidad): quien orquesta (`main.js`) es responsable de registrar
+   * cada elemento una sola vez, igual que ya es responsable de no llamar
+   * `registrarModelo` dos veces para el mismo objeto.
+   *
+   * @param {import('three').Object3D} objeto3D - Objeto 3D ya presente en
+   *   la escena (típicamente vía `registrarModelo`), sobre el que se
+   *   animará el pulso/transición. Debe exponer `material.emissiveIntensity`
+   *   (directamente o en cada elemento si `material` es un array) para que
+   *   el pulso de brillo tenga efecto visible; si no lo expone, el
+   *   registro es válido pero el pulso simplemente no producirá cambio
+   *   visible (no lanza).
+   * @param {Object} [opciones]
+   * @param {number} [opciones.colorHex] - Color de acento para el
+   *   destello de activación (sección 3) y el halo del pulso (sección 2).
+   *   Por defecto `COLOR_CONOCIMIENTO_NEUTRO` (Knowledge Energy System,
+   *   sección 4: mismo lenguaje visual para todo lo relacionado con
+   *   conocimiento cuando no se especifica una Habilidad concreta).
+   * @param {() => string} [opciones.leerEstado] - Función de solo lectura
+   *   invocada cada frame; se espera que devuelva `'bloqueado'` o
+   *   `'resuelto'` (o cualquier otro string: solo se compara por
+   *   igualdad/desigualdad respecto al valor del frame anterior, sin
+   *   validar contra un catálogo — `RenderEngine` no conoce
+   *   `ESTADOS_MECANISMO_VALIDOS` de `WorldModel.js`). Si se omite, el
+   *   elemento solo recibe el pulso constante de la sección 2, nunca la
+   *   transición de activación de la sección 3.
+   * @returns {void}
+   */
+  registrarElementoInteractivo(objeto3D, opciones = {}) {
+    if (!objeto3D) return;
+
+    const colorHex = opciones.colorHex ?? COLOR_CONOCIMIENTO_NEUTRO;
+    const leerEstado = typeof opciones.leerEstado === 'function' ? opciones.leerEstado : null;
+
+    this._elementosInteractivos.push({
+      objeto3D,
+      colorHex,
+      leerEstado,
+      estadoAnterior: leerEstado ? leerEstado() : null,
+      faseActivacion: -1,
+      faseRespiracion: Math.random() * Math.PI * 2, // desfase individual para que no todos "respiren" en sincronía perfecta
+    });
+  }
+
+  /**
+   * Anima, para cada elemento registrado vía `registrarElementoInteractivo`:
+   *   - Un pulso de brillo constante y sutil ("respiración luminosa",
+   *     sección 2), superpuesto sobre el `emissiveIntensity` base del
+   *     material (no lo reemplaza: se guarda/restaura el valor base en el
+   *     primer frame de cada elemento para no perder el valor original si
+   *     este método se llama varias veces).
+   *   - Si `leerEstado()` reporta un cambio de valor respecto al frame
+   *     anterior, dispara una breve transición de "activación" (destello +
+   *     decaimiento suave, sección 3) que se superpone al pulso constante
+   *     durante ~0.6s.
+   *
+   * Nunca lanza si un elemento no expone `material.emissiveIntensity`
+   * (defensivo: `material` podría ser un array o carecer de esa
+   * propiedad en un mock/asset real futuro).
+   *
+   * @private
+   * @param {number} deltaSegundos
+   * @returns {void}
+   */
+  _actualizarFeedbackInteractivo(deltaSegundos) {
+    if (this._elementosInteractivos.length === 0 || deltaSegundos <= 0) {
+      return;
+    }
+
+    const DURACION_ACTIVACION_S = 0.6;
+
+    for (const entrada of this._elementosInteractivos) {
+      const materiales = Array.isArray(entrada.objeto3D.material)
+        ? entrada.objeto3D.material
+        : [entrada.objeto3D.material].filter(Boolean);
+      if (materiales.length === 0) continue;
+
+      if (entrada.emissiveIntensityBase === undefined) {
+        entrada.emissiveIntensityBase = materiales[0].emissiveIntensity ?? 0.3;
+      }
+
+      // Detección de cambio de estado (transición de activación, sección 3).
+      if (entrada.leerEstado) {
+        const estadoActual = entrada.leerEstado();
+        if (estadoActual !== entrada.estadoAnterior) {
+          entrada.faseActivacion = 0;
+        }
+        entrada.estadoAnterior = estadoActual;
+      }
+
+      // Pulso constante ("respiración luminosa"): mismo ritmo para todo
+      // elemento interactivo (Knowledge Energy System, sección 4).
+      entrada.faseRespiracion += deltaSegundos * RITMO_RESPIRACION_CONOCIMIENTO;
+      const pulso = (Math.sin(entrada.faseRespiracion) * 0.5 + 0.5) * 0.15; // 0..0.15, siempre sutil
+
+      let bonusActivacion = 0;
+      if (entrada.faseActivacion >= 0) {
+        entrada.faseActivacion += deltaSegundos / DURACION_ACTIVACION_S;
+        if (entrada.faseActivacion >= 1) {
+          entrada.faseActivacion = -1;
+        } else {
+          // Destello que decae exponencialmente (Math.sin(π·x) también
+          // funcionaría, pero un decaimiento exponencial se lee más como
+          // "disipación de energía" que como un pulso simétrico).
+          bonusActivacion = Math.exp(-entrada.faseActivacion * 4) * 0.6;
+        }
+      }
+
+      for (const material of materiales) {
+        if ('emissiveIntensity' in material) {
+          material.emissiveIntensity = entrada.emissiveIntensityBase + pulso + bonusActivacion;
+        }
+      }
+    }
+  }
+
+  /**
+   * Compara `progreso.habilidades()` del frame actual contra el snapshot
+   * del frame anterior para detectar Habilidades recién obtenidas y
+   * disparar el "Ability Acquisition Feedback" (SPEC-05 sección 1) sobre
+   * la posición actual de Codi: un estallido de partículas efímero
+   * (`THREE.Points`, ~16 partículas, vida ~0.8s) del color de la Habilidad
+   * (`HABILIDAD_COLORES`, Knowledge Energy System) más un pulso breve de
+   * la luz de acento que ya sigue a Codi (reutilizada, no se crea una luz
+   * nueva — evita duplicar componentes, ver checklist de Consistency
+   * Pass).
+   *
+   * No-op seguro si `progreso` no se proporcionó (parámetro opcional de
+   * `render()`) o si no expone `habilidades()` como función.
+   *
+   * @private
+   * @param {{habilidades: () => Set<string>}|undefined} progreso
+   * @param {import('../movement/MovementSystem.js').CodiPose} [poseCodi]
+   * @returns {void}
+   */
+  _detectarNuevasHabilidades(progreso, poseCodi) {
+    if (!progreso || typeof progreso.habilidades !== 'function') {
+      return;
+    }
+
+    const habilidadesActuales = progreso.habilidades();
+
+    if (this._habilidadesConocidasAnteriores === null) {
+      // Primer frame con `progreso` disponible: establece la base sin
+      // disparar estallidos por Habilidades que ya se poseían de antemano.
+      this._habilidadesConocidasAnteriores = new Set(habilidadesActuales);
+      return;
+    }
+
+    for (const habilidadId of habilidadesActuales) {
+      if (!this._habilidadesConocidasAnteriores.has(habilidadId)) {
+        const posicionOrigen = poseCodi?.position ?? { x: 0, y: 1, z: 0 };
+        const colorHex = HABILIDAD_COLORES[habilidadId] ?? COLOR_CONOCIMIENTO_NEUTRO;
+        this._dispararEstallidoConocimiento(posicionOrigen, colorHex);
+        this._dispararPulsoLuzAcento();
+      }
+    }
+
+    this._habilidadesConocidasAnteriores = new Set(habilidadesActuales);
+  }
+
+  /**
+   * Crea y añade a la escena un estallido de partículas efímero centrado
+   * en `posicionOrigen` (sobre Codi, elevado ligeramente para leerse como
+   * "sobre su cabeza/pecho" en vez de a la altura de los pies). Se
+   * registra en `this._estallidosConocimiento` para que
+   * `_actualizarEstallidosConocimiento` lo expanda/desvanezca y lo remueva
+   * automáticamente al cumplir `DURACION_ESTALLIDO_S`.
+   *
+   * @private
+   * @param {{x:number,y:number,z:number}} posicionOrigen
+   * @param {number} colorHex
+   * @returns {void}
+   */
+  _dispararEstallidoConocimiento(posicionOrigen, colorHex) {
+    const CANTIDAD = 16;
+    const posiciones = new Float32Array(CANTIDAD * 3);
+    const direcciones = new Float32Array(CANTIDAD * 3);
+
+    for (let i = 0; i < CANTIDAD; i += 1) {
+      // Direcciones radiales distribuidas en una esfera (no solo en un
+      // plano), para que el estallido se lea como una "expansión de
+      // energía" tridimensional alrededor de Codi.
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(Math.random() * 2 - 1);
+      const dx = Math.sin(phi) * Math.cos(theta);
+      const dy = Math.sin(phi) * Math.sin(theta);
+      const dz = Math.cos(phi);
+
+      posiciones[i * 3] = posicionOrigen.x;
+      posiciones[i * 3 + 1] = posicionOrigen.y + 0.9;
+      posiciones[i * 3 + 2] = posicionOrigen.z;
+
+      direcciones[i * 3] = dx;
+      direcciones[i * 3 + 1] = dy;
+      direcciones[i * 3 + 2] = dz;
+    }
+
+    const geometria = new THREE.BufferGeometry();
+    geometria.setAttribute('position', new THREE.BufferAttribute(posiciones, 3));
+
+    const material = new THREE.PointsMaterial({
+      color: colorHex,
+      size: 0.08,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+      sizeAttenuation: true,
+    });
+
+    const puntos = new THREE.Points(geometria, material);
+    puntos.userData.direcciones = direcciones;
+    puntos.userData.origen = { ...posicionOrigen };
+    this._scene.add(puntos);
+
+    this._estallidosConocimiento.push({ puntos, edadSegundos: 0 });
+  }
+
+  /**
+   * Expande y desvanece cada estallido de conocimiento activo
+   * (`this._estallidosConocimiento`): las partículas se alejan de su
+   * `origen` a lo largo de su `direccion` individual y la opacidad decae
+   * linealmente hasta 0 a lo largo de `DURACION_ESTALLIDO_S`. Al cumplirse
+   * la duración, el estallido se remueve de la escena y se libera su
+   * geometría/material (sin dejar recursos huérfanos acumulándose durante
+   * una sesión larga).
+   *
+   * @private
+   * @param {number} deltaSegundos
+   * @returns {void}
+   */
+  _actualizarEstallidosConocimiento(deltaSegundos) {
+    if (this._estallidosConocimiento.length === 0 || deltaSegundos <= 0) {
+      return;
+    }
+
+    const DURACION_ESTALLIDO_S = 0.8;
+    const VELOCIDAD_EXPANSION = 1.4;
+
+    for (let i = this._estallidosConocimiento.length - 1; i >= 0; i -= 1) {
+      const estallido = this._estallidosConocimiento[i];
+      estallido.edadSegundos += deltaSegundos;
+
+      if (estallido.edadSegundos >= DURACION_ESTALLIDO_S) {
+        this._scene.remove(estallido.puntos);
+        estallido.puntos.geometry.dispose();
+        estallido.puntos.material.dispose();
+        this._estallidosConocimiento.splice(i, 1);
+        continue;
+      }
+
+      const { puntos } = estallido;
+      const { direcciones, origen } = puntos.userData;
+      const posiciones = puntos.geometry.attributes.position.array;
+      const distanciaRecorrida = estallido.edadSegundos * VELOCIDAD_EXPANSION;
+
+      for (let p = 0; p < direcciones.length / 3; p += 1) {
+        posiciones[p * 3] = origen.x + direcciones[p * 3] * distanciaRecorrida;
+        posiciones[p * 3 + 1] = origen.y + direcciones[p * 3 + 1] * distanciaRecorrida;
+        posiciones[p * 3 + 2] = origen.z + direcciones[p * 3 + 2] * distanciaRecorrida;
+      }
+      puntos.geometry.attributes.position.needsUpdate = true;
+
+      puntos.material.opacity = 1 - estallido.edadSegundos / DURACION_ESTALLIDO_S;
+    }
+  }
+
+  /**
+   * Dispara un breve pulso de intensidad sobre la luz de acento que ya
+   * sigue a Codi (`this._luzAcento`, SPEC-03): reutiliza el mismo
+   * componente en vez de crear una luz nueva (Consistency Pass, evitar
+   * duplicación). El pulso se guarda como un multiplicador que
+   * `_actualizarMicroFeedbackCamara` suma sobre la intensidad BASE de la
+   * luz (`this._intensidadBaseLuzAcento`, capturada una sola vez) y decae
+   * exponencialmente cada frame, de modo que `_luzAcento.intensity`
+   * siempre converge de vuelta a su valor base en vez de derivar hacia
+   * arriba indefinidamente.
+   *
+   * @private
+   * @returns {void}
+   */
+  _dispararPulsoLuzAcento() {
+    if (this._intensidadBaseLuzAcento === undefined) {
+      this._intensidadBaseLuzAcento = this._luzAcento.intensity;
+    }
+    this._pulsoLuzAcentoRestante = (this._pulsoLuzAcentoRestante ?? 0) + this._intensidadBaseLuzAcento * 1.5;
+  }
+
+  /**
+   * "Camera Micro Feedback" (SPEC-05 sección 5): calcula un pequeño offset
+   * vertical temporal aplicado a la posición final de la cámara (ver
+   * `render()`, donde se suma a `posicionCamara.y` sin tocar
+   * `CameraSystem`). Dos disparadores, ambos derivados exclusivamente de
+   * `poseCodi` (ya expuesto, sin nueva dependencia):
+   *   - **Aterrizaje**: al detectar la transición `animState 'jump' ->
+   *     no-'jump'`, un pequeño "hundimiento" de la cámara que se recupera
+   *     rápido (simula el peso del aterrizaje sin mover a Codi).
+   *   - **Obtención de Habilidad**: reutiliza el mismo offset con un
+   *     impulso hacia arriba, más sutil, disparado por
+   *     `_detectarNuevasHabilidades` (comparten el mismo amortiguador para
+   *     no acumular dos sistemas de resorte independientes — Consistency
+   *     Pass).
+   *
+   * Amplitud deliberadamente pequeña (máximo ~0.12 unidades) y
+   * amortiguación rápida (constante de tiempo ~0.15s) para nunca producir
+   * la sensación de mareo explícitamente prohibida por la sección 5.
+   *
+   * @private
+   * @param {import('../movement/MovementSystem.js').CodiPose} [poseCodi]
+   * @param {number} deltaSegundos
+   * @returns {void}
+   */
+  _actualizarMicroFeedbackCamara(poseCodi, deltaSegundos) {
+    // La detección de la transición "estaba en el aire -> ya no" se
+    // actualiza SIEMPRE (incluso en el primer frame, donde deltaSegundos
+    // es 0 por definición de `_avanzarRelojInterno`), para no perder el
+    // estado "en el aire" del primer frame si el salto ya estaba activo
+    // desde el inicio. Solo la amortiguación/aplicación de impulsos
+    // depende de tener un `deltaSegundos` real.
+    const enElAire = poseCodi?.animState === 'jump';
+    const aterrizoEsteFrame = this._enElAireAnterior && !enElAire;
+    this._enElAireAnterior = enElAire;
+
+    if (deltaSegundos <= 0) {
+      return;
+    }
+
+    if (aterrizoEsteFrame) {
+      // Transición de aterrizaje: pequeño impulso hacia abajo.
+      this._offsetMicroFeedbackCamara -= 0.12;
+    }
+
+    if (this._pulsoLuzAcentoRestante && this._pulsoLuzAcentoRestante > 0) {
+      // Impulso de cámara al obtener una Habilidad, disparado una sola vez
+      // en el frame en que aparece el pulso (no se re-dispara mientras
+      // decae, para no sumar offset cada frame).
+      if (!this._impulsoCamaraHabilidadAplicado) {
+        this._offsetMicroFeedbackCamara += 0.05;
+        this._impulsoCamaraHabilidadAplicado = true;
+      }
+
+      // La intensidad de la luz de acento converge de vuelta a su valor
+      // BASE (nunca se deja acumular hacia arriba): se fija explícitamente
+      // como base + remanente del pulso, que decae exponencialmente.
+      this._pulsoLuzAcentoRestante *= Math.exp(-deltaSegundos * 8);
+      if (this._pulsoLuzAcentoRestante < 0.01) {
+        this._pulsoLuzAcentoRestante = 0;
+        this._impulsoCamaraHabilidadAplicado = false;
+      }
+      this._luzAcento.intensity = this._intensidadBaseLuzAcento + this._pulsoLuzAcentoRestante;
+    }
+
+    // Amortiguación exponencial hacia 0, independiente del framerate
+    // (misma técnica que `offsetLatigazoCola` de SPEC-04).
+    this._offsetMicroFeedbackCamara *= Math.exp(-deltaSegundos * 10);
+  }
+
+  /**
    * Actualiza el tamaño del renderer y la relación de aspecto de la cámara
    * ante un cambio de dimensiones del viewport (Requirements 2.4). Se expone
    * como método público (además de usarse internamente como listener de
@@ -1309,6 +1941,7 @@ export class RenderEngine {
     this._composer?.dispose();
     this._skyGradient?.geometry.dispose();
     this._skyGradient?.material.dispose();
+    this._vidaAmbiental?.dispose();
     this._renderer.dispose();
   }
 

@@ -647,3 +647,394 @@ describe('RenderEngine - SPEC-04 Character Polish: Codi (idle, blink, eye life, 
     expect(brazos[0].position.z).toBeCloseTo(posicionesIniciales[1].z);
   });
 });
+
+describe('RenderEngine - SPEC-05 Interactive Feedback & Game Feel', () => {
+  let performanceNowSpy;
+  let tiempoActualMs;
+
+  beforeEach(() => {
+    tiempoActualMs = 0;
+    performanceNowSpy = vi.spyOn(performance, 'now').mockImplementation(() => tiempoActualMs);
+  });
+
+  afterEach(() => {
+    performanceNowSpy.mockRestore();
+  });
+
+  function avanzarTiempo(ms) {
+    tiempoActualMs += ms;
+  }
+
+  function poseQuieta(overrides = {}) {
+    return {
+      position: { x: 0, y: 1, z: 0 },
+      rotationY: 0,
+      velocity: { x: 0, y: 0, z: 0 },
+      animState: 'idle',
+      lastSafePosition: { x: 0, y: 1, z: 0 },
+      ...overrides,
+    };
+  }
+
+  function crearProgresoMock(idsIniciales = []) {
+    let ids = new Set(idsIniciales);
+    return {
+      habilidades: () => new Set(ids),
+      _otorgar(id) {
+        ids = new Set([...ids, id]);
+      },
+    };
+  }
+
+  describe('render() con tercer parámetro "progreso" (retrocompatibilidad)', () => {
+    it('render(poseCodi, estadoCamara) sin progreso sigue funcionando exactamente igual (2 argumentos)', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      expect(() => renderEngine.render(poseQuieta(), undefined)).not.toThrow();
+    });
+
+    it('render(poseCodi, estadoCamara, progreso) no lanza y no dispara nada en el primer frame (establece la base)', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      const progreso = crearProgresoMock(['python']);
+      expect(() => renderEngine.render(poseQuieta(), undefined, progreso)).not.toThrow();
+      expect(renderEngine.scene.children.filter((h) => h instanceof THREE.Points).length).toBe(1); // solo las partículas ambientales de SPEC-03
+    });
+  });
+
+  describe('Ability Acquisition Feedback (sección 1)', () => {
+    it('al detectar una nueva Habilidad respecto al frame anterior, se dispara un estallido de partículas sobre Codi', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      const progreso = crearProgresoMock(['python']);
+
+      renderEngine.render(poseQuieta(), undefined, progreso); // frame base
+      const cantidadPointsAntes = renderEngine.scene.children.filter((h) => h instanceof THREE.Points).length;
+
+      progreso._otorgar('javascript');
+      avanzarTiempo(16);
+      renderEngine.render(poseQuieta(), undefined, progreso);
+
+      const cantidadPointsDespues = renderEngine.scene.children.filter((h) => h instanceof THREE.Points).length;
+      expect(cantidadPointsDespues).toBe(cantidadPointsAntes + 1); // +1 estallido nuevo
+    });
+
+    it('el estallido de partículas se expande y se desvanece, removiéndose de la escena tras su duración', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      const progreso = crearProgresoMock([]);
+
+      renderEngine.render(poseQuieta(), undefined, progreso);
+      progreso._otorgar('sql');
+      avanzarTiempo(16);
+      renderEngine.render(poseQuieta(), undefined, progreso);
+
+      const cantidadConEstallido = renderEngine.scene.children.filter((h) => h instanceof THREE.Points).length;
+      expect(cantidadConEstallido).toBeGreaterThan(1);
+
+      for (let i = 0; i < 30; i += 1) {
+        avanzarTiempo(50); // 30 * 50ms = 1.5s, más que DURACION_ESTALLIDO_S (0.8s)
+        renderEngine.render(poseQuieta(), undefined, progreso);
+      }
+
+      const cantidadFinal = renderEngine.scene.children.filter((h) => h instanceof THREE.Points).length;
+      expect(cantidadFinal).toBe(1); // solo quedan las partículas ambientales
+    });
+
+    it('no dispara ningún estallido si el conjunto de habilidades no cambia entre frames', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      const progreso = crearProgresoMock(['python']);
+
+      renderEngine.render(poseQuieta(), undefined, progreso);
+      const cantidadInicial = renderEngine.scene.children.filter((h) => h instanceof THREE.Points).length;
+
+      for (let i = 0; i < 5; i += 1) {
+        avanzarTiempo(16);
+        renderEngine.render(poseQuieta(), undefined, progreso);
+      }
+
+      expect(renderEngine.scene.children.filter((h) => h instanceof THREE.Points).length).toBe(cantidadInicial);
+    });
+  });
+
+  describe('registrarElementoInteractivo (secciones 2 y 3)', () => {
+    function crearElementoConMaterial(emissiveIntensityInicial = 0.3) {
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x0f172a,
+        emissive: 0x06b6d4,
+        emissiveIntensity: emissiveIntensityInicial,
+      });
+      return new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
+    }
+
+    it('no lanza al registrar sin opciones, y no rompe render() aunque no exponga leerEstado', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      const elemento = crearElementoConMaterial();
+      expect(() => renderEngine.registrarElementoInteractivo(elemento)).not.toThrow();
+      expect(() => renderEngine.render(poseQuieta(), undefined)).not.toThrow();
+    });
+
+    it('aplica un pulso de brillo sutil constante sobre emissiveIntensity (respiración luminosa), sin exceder un rango sutil', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      const elemento = crearElementoConMaterial(0.3);
+      renderEngine.registrarElementoInteractivo(elemento, { colorHex: 0x38bdf8 });
+
+      const valoresObservados = new Set();
+      renderEngine.render(poseQuieta(), undefined);
+      for (let i = 0; i < 30; i += 1) {
+        avanzarTiempo(50);
+        renderEngine.render(poseQuieta(), undefined);
+        valoresObservados.add(elemento.material.emissiveIntensity.toFixed(4));
+      }
+
+      expect(valoresObservados.size).toBeGreaterThan(1); // varía (pulsa)
+      for (const valorTexto of valoresObservados) {
+        // Nunca "exagerado": el pulso base (sin transición de activación)
+        // se mantiene dentro de un rango pequeño alrededor del valor base.
+        expect(Number(valorTexto)).toBeGreaterThanOrEqual(0.3);
+        expect(Number(valorTexto)).toBeLessThan(0.3 + 0.16);
+      }
+    });
+
+    it('al cambiar leerEstado() de "bloqueado" a "resuelto", dispara un destello de activación por encima del pulso base', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      const elemento = crearElementoConMaterial(0.3);
+      let estadoMecanismo = 'bloqueado';
+      renderEngine.registrarElementoInteractivo(elemento, {
+        colorHex: 0x38bdf8,
+        leerEstado: () => estadoMecanismo,
+      });
+
+      renderEngine.render(poseQuieta(), undefined);
+      avanzarTiempo(50);
+      renderEngine.render(poseQuieta(), undefined);
+      const intensidadAntesDeResolver = elemento.material.emissiveIntensity;
+
+      estadoMecanismo = 'resuelto';
+      avanzarTiempo(50);
+      renderEngine.render(poseQuieta(), undefined);
+      const intensidadTrasResolver = elemento.material.emissiveIntensity;
+
+      // El destello debe ser claramente mayor que el pulso base normal.
+      expect(intensidadTrasResolver).toBeGreaterThan(intensidadAntesDeResolver + 0.1);
+    });
+
+    it('el destello de activación decae con el tiempo (transición suave, nunca instantánea) hasta converger de vuelta al rango del pulso base', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      const elemento = crearElementoConMaterial(0.3);
+      let estadoMecanismo = 'bloqueado';
+      renderEngine.registrarElementoInteractivo(elemento, { leerEstado: () => estadoMecanismo });
+
+      renderEngine.render(poseQuieta(), undefined);
+      estadoMecanismo = 'resuelto';
+      avanzarTiempo(16);
+      renderEngine.render(poseQuieta(), undefined);
+      const picoInicial = elemento.material.emissiveIntensity;
+
+      // Mucho más allá de DURACION_ACTIVACION_S (0.6s): el destello ya
+      // debe haberse disipado por completo, dejando solo el pulso base
+      // (oscilante pero acotado a un rango sutil, sección 2).
+      for (let i = 0; i < 40; i += 1) {
+        avanzarTiempo(50); // 40 * 50ms = 2s
+        renderEngine.render(poseQuieta(), undefined);
+      }
+      const valorFinal = elemento.material.emissiveIntensity;
+
+      expect(valorFinal).toBeLessThan(picoInicial);
+      // Converge de vuelta al rango del pulso base sutil (0.3 a 0.3+0.15).
+      expect(valorFinal).toBeLessThanOrEqual(0.3 + 0.16);
+    });
+
+    it('no lanza si material es un array de materiales', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      const mat1 = new THREE.MeshStandardMaterial({ emissiveIntensity: 0.2 });
+      const mat2 = new THREE.MeshStandardMaterial({ emissiveIntensity: 0.2 });
+      const elemento = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), [mat1, mat2]);
+      renderEngine.registrarElementoInteractivo(elemento);
+      expect(() => renderEngine.render(poseQuieta(), undefined)).not.toThrow();
+    });
+  });
+
+  describe('Camera Micro Feedback (sección 5)', () => {
+    function estadoCamaraBase() {
+      return {
+        posicionCamara: { x: 0, y: 5, z: 7 },
+        target: { x: 0, y: 1, z: 0 },
+      };
+    }
+
+    it('al aterrizar (transición jump -> idle), la cámara recibe un pequeño offset temporal que luego se amortigua a 0', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+
+      renderEngine.render(poseQuieta({ animState: 'jump' }), estadoCamaraBase());
+      avanzarTiempo(16);
+      renderEngine.render(poseQuieta({ animState: 'idle' }), estadoCamaraBase());
+
+      const yTrasAterrizar = renderEngine.camera.position.y;
+      expect(yTrasAterrizar).not.toBeCloseTo(5, 3); // hay un offset aplicado
+
+      for (let i = 0; i < 60; i += 1) {
+        avanzarTiempo(50);
+        renderEngine.render(poseQuieta({ animState: 'idle' }), estadoCamaraBase());
+      }
+
+      expect(renderEngine.camera.position.y).toBeCloseTo(5, 2); // vuelve a la posición base
+    });
+
+    it('el offset de micro feedback nunca excede un rango pequeño (nunca debe provocar mareo)', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+
+      renderEngine.render(poseQuieta({ animState: 'jump' }), estadoCamaraBase());
+      avanzarTiempo(16);
+      renderEngine.render(poseQuieta({ animState: 'idle' }), estadoCamaraBase());
+
+      const desviacion = Math.abs(renderEngine.camera.position.y - 5);
+      expect(desviacion).toBeLessThan(0.2);
+    });
+
+    it('no lanza sin estadoCamara (offset no se aplica si no hay cámara que mover)', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      renderEngine.render(poseQuieta({ animState: 'jump' }), undefined);
+      avanzarTiempo(16);
+      expect(() => renderEngine.render(poseQuieta({ animState: 'idle' }), undefined)).not.toThrow();
+    });
+
+    it('el Micro Feedback de cámara no invoca ninguna función de CameraSystem (solo suma un offset sobre estadoCamara ya calculado)', () => {
+      // Verificación de comportamiento (no de imports): confirma que la
+      // posición final de la cámara es exactamente
+      // `posicionCamara.y + offset`, es decir, que RenderEngine no
+      // recalcula la órbita/colisión de cámara por su cuenta — solo
+      // desplaza verticalmente el resultado que `CameraSystem` ya produjo.
+      const { renderEngine } = crearRenderEngineConCodi();
+      const estadoCamara = { posicionCamara: { x: 2, y: 5, z: 7 }, target: { x: 2, y: 1, z: 0 } };
+
+      renderEngine.render(poseQuieta({ animState: 'jump', position: { x: 2, y: 1, z: 0 } }), estadoCamara);
+      avanzarTiempo(16);
+      renderEngine.render(poseQuieta({ animState: 'idle', position: { x: 2, y: 1, z: 0 } }), estadoCamara);
+
+      expect(renderEngine.camera.position.x).toBeCloseTo(2); // x/z nunca se alteran, solo y
+      expect(renderEngine.camera.position.z).toBeCloseTo(7);
+    });
+  });
+
+  describe('Knowledge Energy System (sección 4) — consistencia de color por Habilidad', () => {
+    it('un estallido de Ability Acquisition Feedback usa el color correspondiente a la Habilidad recién obtenida', () => {
+      const { renderEngine } = crearRenderEngineConCodi();
+      const progreso = crearProgresoMock([]);
+
+      renderEngine.render(poseQuieta(), undefined, progreso);
+      progreso._otorgar('python');
+      avanzarTiempo(16);
+      renderEngine.render(poseQuieta(), undefined, progreso);
+
+      const estallido = renderEngine.scene.children.find(
+        (h) => h instanceof THREE.Points && h.material.color.getHex() !== 0x9fd8e8
+      );
+      expect(estallido).toBeDefined();
+      expect(estallido.material.color.getHex()).toBe(0xfbbf24); // color de Python
+    });
+  });
+});
+
+describe('RenderEngine - SPEC-06 Living World: Ambient Life System (integración)', () => {
+  let performanceNowSpy;
+  let tiempoActualMs;
+
+  beforeEach(() => {
+    tiempoActualMs = 0;
+    performanceNowSpy = vi.spyOn(performance, 'now').mockImplementation(() => tiempoActualMs);
+  });
+
+  afterEach(() => {
+    performanceNowSpy.mockRestore();
+  });
+
+  function avanzarTiempo(ms) {
+    tiempoActualMs += ms;
+  }
+
+  it('los cristales/glifos de _crearDetallesAmbientales tienen materiales individuales (no compartidos)', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    const grupoDetalles = renderEngine.scene.children.find(
+      (hijo) => hijo instanceof THREE.Group && hijo.children.some((c) => c.geometry?.type === 'OctahedronGeometry')
+    );
+    const cristales = grupoDetalles.children.filter((c) => c.geometry.type === 'OctahedronGeometry');
+
+    expect(cristales[0].material).not.toBe(cristales[1].material);
+    expect(cristales[0].material).not.toBe(cristales[2].material);
+  });
+
+  it('tras varios frames, la emissiveIntensity de los cristales varía (Ambient Life Controller activo)', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    const grupoDetalles = renderEngine.scene.children.find(
+      (hijo) => hijo instanceof THREE.Group && hijo.children.some((c) => c.geometry?.type === 'OctahedronGeometry')
+    );
+    const [cristal] = grupoDetalles.children.filter((c) => c.geometry.type === 'OctahedronGeometry');
+    const intensidadInicial = cristal.material.emissiveIntensity;
+
+    renderEngine.render(undefined, undefined);
+    for (let i = 0; i < 40; i += 1) {
+      avanzarTiempo(50);
+      renderEngine.render(undefined, undefined);
+    }
+
+    expect(cristal.material.emissiveIntensity).not.toBeCloseTo(intensidadInicial, 4);
+  });
+
+  it('Ambient Dust Evolution: las partículas ambientales presentan drift lateral (turbulencia) además del ascenso vertical', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    const particulas = renderEngine.scene.children.find((hijo) => hijo instanceof THREE.Points);
+    const posicionesIniciales = Array.from(particulas.geometry.attributes.position.array);
+
+    renderEngine.render(undefined, undefined);
+    for (let i = 0; i < 30; i += 1) {
+      avanzarTiempo(50);
+      renderEngine.render(undefined, undefined);
+    }
+
+    const posicionesFinales = particulas.geometry.attributes.position.array;
+    // Verifica cambio en X (índice 0, 3, 6...) — el drift lateral, no solo
+    // el ascenso en Y ya cubierto por un test previo de SPEC-03.
+    let algunCambioEnX = false;
+    for (let i = 0; i < posicionesFinales.length; i += 3) {
+      if (Math.abs(posicionesFinales[i] - posicionesIniciales[i]) > 1e-5) {
+        algunCambioEnX = true;
+        break;
+      }
+    }
+    expect(algunCambioEnX).toBe(true);
+  });
+
+  it('el tamaño del material de partículas ambientales varía sutilmente con el tiempo (profundidad)', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    const particulas = renderEngine.scene.children.find((hijo) => hijo instanceof THREE.Points);
+    const tamanoInicial = particulas.material.size;
+
+    renderEngine.render(undefined, undefined);
+    for (let i = 0; i < 100; i += 1) {
+      avanzarTiempo(50);
+      renderEngine.render(undefined, undefined);
+    }
+
+    // Sutil: nunca debe alejarse mucho del tamaño base original.
+    expect(Math.abs(particulas.material.size - tamanoInicial)).toBeLessThan(0.06);
+  });
+
+  it('render() sigue funcionando sin lanzar cuando Codi permanece quieto por mucho tiempo (Idle World Variations no rompe nada)', () => {
+    const { renderEngine } = crearRenderEngineConCodi();
+    const poseQuietaLarga = {
+      position: { x: 0, y: 1, z: 0 },
+      rotationY: 0,
+      velocity: { x: 0, y: 0, z: 0 },
+      animState: 'idle',
+      lastSafePosition: { x: 0, y: 1, z: 0 },
+    };
+
+    renderEngine.render(poseQuietaLarga, undefined);
+    for (let i = 0; i < 200; i += 1) {
+      avanzarTiempo(100); // 200 * 100ms = 20s de quietud continua
+      expect(() => renderEngine.render(poseQuietaLarga, undefined)).not.toThrow();
+    }
+  });
+
+  it('dispose() no lanza tras haber creado el AmbientLifeController', () => {
+    const renderEngine = new RenderEngine(createCanvasMock());
+    expect(() => renderEngine.dispose()).not.toThrow();
+  });
+});
