@@ -60,8 +60,8 @@ export const ZONAS = [
     mecanismoIds: [],
     libroId: 'libro-python',
     limites: {
-      min: { x: -10, y: 0, z: -10 },
-      max: { x: 10, y: 10, z: 10 },
+      min: { x: -10, y: 0, z: -5 },
+      max: { x: 10, y: 10, z: 5 },
     },
   },
   {
@@ -71,8 +71,8 @@ export const ZONAS = [
     mecanismoIds: ['puente-sendero-01', 'dispositivo-sendero-01'],
     libroId: 'libro-javascript',
     limites: {
-      min: { x: 10, y: 0, z: -10 },
-      max: { x: 30, y: 10, z: 10 },
+      min: { x: -10, y: 0, z: -25 },
+      max: { x: 10, y: 10, z: -15 },
     },
   },
   {
@@ -85,8 +85,8 @@ export const ZONAS = [
     ],
     libroId: 'libro-sql',
     limites: {
-      min: { x: 30, y: 0, z: -10 },
-      max: { x: 50, y: 10, z: 10 },
+      min: { x: -10, y: 0, z: -45 },
+      max: { x: 10, y: 10, z: -35 },
     },
   },
   {
@@ -95,8 +95,8 @@ export const ZONAS = [
     habilidadesRequeridas: ['python', 'javascript', 'sql'],
     mecanismoIds: ['camino-oculto-biblioteca-01', 'fuente-informacion-biblioteca-01'],
     limites: {
-      min: { x: 50, y: 0, z: -10 },
-      max: { x: 70, y: 10, z: 10 },
+      min: { x: -10, y: 0, z: -65 },
+      max: { x: 10, y: 10, z: -55 },
     },
   },
 ];
@@ -123,9 +123,9 @@ export const MECANISMOS = [
     habilidadRequerida: 'python',
     zonaId: 'sendero-del-puente',
     estado: 'bloqueado',
-    posicion: { x: 20, y: 1, z: 0 },
-    puntoA: { x: 15, y: 1, z: 0 },
-    puntoB: { x: 25, y: 1, z: 0 },
+    posicion: { x: 0, y: 1, z: -20 },
+    puntoA: { x: 0, y: 1, z: -12 },
+    puntoB: { x: 0, y: 1, z: -22 },
   },
   {
     id: 'solucion-automatizada-plataforma-01',
@@ -133,7 +133,7 @@ export const MECANISMOS = [
     habilidadRequerida: 'python',
     zonaId: 'plataforma-mecanica',
     estado: 'bloqueado',
-    posicion: { x: 45, y: 1, z: -6 },
+    posicion: { x: 0, y: 1, z: -38 },
   },
   {
     id: 'dispositivo-sendero-01',
@@ -141,7 +141,7 @@ export const MECANISMOS = [
     habilidadRequerida: 'javascript',
     zonaId: 'sendero-del-puente',
     estado: 'bloqueado',
-    posicion: { x: 15, y: 1, z: 5 },
+    posicion: { x: 3, y: 1, z: -18 },
   },
   {
     id: 'plataforma-movil-mecanica-01',
@@ -149,9 +149,9 @@ export const MECANISMOS = [
     habilidadRequerida: 'javascript',
     zonaId: 'plataforma-mecanica',
     estado: 'bloqueado',
-    posicion: { x: 48, y: 1, z: 0 },
-    puntoA: { x: 48, y: 1, z: -8 },
-    puntoB: { x: 48, y: 1, z: 8 },
+    posicion: { x: 0, y: 1, z: -40 },
+    puntoA: { x: -3, y: 1, z: -40 },
+    puntoB: { x: 3, y: 1, z: -40 },
   },
   {
     id: 'camino-oculto-biblioteca-01',
@@ -159,7 +159,7 @@ export const MECANISMOS = [
     habilidadRequerida: 'sql',
     zonaId: 'biblioteca-corrupta',
     estado: 'bloqueado',
-    posicion: { x: 55, y: 1, z: 0 },
+    posicion: { x: 0, y: 1, z: -58 },
     objetivoRevelacionId: 'objetivo-revelacion-camino-biblioteca-01',
   },
   {
@@ -168,7 +168,7 @@ export const MECANISMOS = [
     habilidadRequerida: 'sql',
     zonaId: 'biblioteca-corrupta',
     estado: 'bloqueado',
-    posicion: { x: 65, y: 1, z: 5 },
+    posicion: { x: 3, y: 1, z: -60 },
   },
 ];
 
@@ -184,21 +184,21 @@ export const LIBROS = [
     id: 'libro-python',
     habilidadId: 'python',
     zonaId: 'claro-de-llegada',
-    posicion: { x: 0, y: 1, z: 0 },
+    posicion: { x: 0, y: 3.0, z: -3 }, // Elevado para requerir salto
     absorbido: false,
   },
   {
     id: 'libro-javascript',
     habilidadId: 'javascript',
     zonaId: 'sendero-del-puente',
-    posicion: { x: 20, y: 1, z: 5 },
+    posicion: { x: 0, y: 3.2, z: -20 }, // Elevado para requerir salto
     absorbido: false,
   },
   {
     id: 'libro-sql',
     habilidadId: 'sql',
     zonaId: 'plataforma-mecanica',
-    posicion: { x: 40, y: 1, z: 5 },
+    posicion: { x: 0, y: 3.0, z: -40 }, // Elevado para requerir salto
     absorbido: false,
   },
 ];

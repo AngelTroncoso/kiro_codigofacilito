@@ -748,38 +748,92 @@ export class AssetLoader {
   crearLibroConocimiento3D(habilidadId) {
     const grupo = new THREE.Group();
 
-    // Colores por lenguaje de programación
-    const COLORES_POR_HABILIDAD = {
-      python: 0x306998,      // Azul Python oficial
-      javascript: 0xf7df1e,  // Amarillo JavaScript oficial
-      sql: 0x00758f,         // Azul cian tecnológico SQL
+    // Colores y siglas por lenguaje de programación
+    const CONFIGURACION_LENGUAJES = {
+      python: { 
+        colorFondo: 0x306998,      // Azul Python oficial
+        siglas: 'PY',
+        colorTexto: '#FFD43B',     // Amarillo Python
+      },
+      javascript: { 
+        colorFondo: 0xf7df1e,      // Amarillo JavaScript oficial
+        siglas: 'JS',
+        colorTexto: '#323330',     // Negro/marrón JS
+      },
+      sql: { 
+        colorFondo: 0x00758f,      // Azul cian tecnológico SQL
+        siglas: 'SQL',
+        colorTexto: '#FFFFFF',     // Blanco brillante
+      },
     };
 
-    const colorPortada = COLORES_POR_HABILIDAD[habilidadId] || 0x8b4513; // Café por defecto
+    const config = CONFIGURACION_LENGUAJES[habilidadId] || { 
+      colorFondo: 0x8b4513, 
+      siglas: '??', 
+      colorTexto: '#FFFFFF' 
+    };
+
+    // Crear textura con siglas usando Canvas2D
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+
+    // Fondo del color del lenguaje
+    ctx.fillStyle = '#' + config.colorFondo.toString(16).padStart(6, '0');
+    ctx.fillRect(0, 0, 256, 256);
+
+    // Dibujar siglas en el centro
+    ctx.fillStyle = config.colorTexto;
+    ctx.font = 'bold 120px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(config.siglas, 128, 128);
+
+    // Convertir canvas a textura
+    const textura = new THREE.CanvasTexture(canvas);
+    textura.needsUpdate = true;
 
     // PORTADA/PASTA - Tapa frontal y trasera del libro
     const geometriaPortada = new THREE.BoxGeometry(0.5, 0.7, 0.05);
     const materialPortada = new THREE.MeshStandardMaterial({
-      color: colorPortada,
-      emissive: colorPortada,
-      emissiveIntensity: 0.4, // Brillo para destacar sobre la plataforma
-      roughness: 0.6,
-      metalness: 0.2,
+      map: textura,                  // Textura con siglas
+      emissive: config.colorFondo,
+      emissiveMap: textura,          // Textura también en emisión para que las siglas brillen
+      emissiveIntensity: 0.85,       // Brillo intenso para máxima visibilidad a distancia
+      roughness: 0.4,
+      metalness: 0.3,
     });
 
-    // Tapa frontal
+    // Material sin textura para la tapa trasera
+    const materialPortadaTrasera = new THREE.MeshStandardMaterial({
+      color: config.colorFondo,
+      emissive: config.colorFondo,
+      emissiveIntensity: 0.85,
+      roughness: 0.4,
+      metalness: 0.3,
+    });
+
+    // Tapa frontal (con siglas)
     const portadaFrontal = new THREE.Mesh(geometriaPortada, materialPortada);
     portadaFrontal.position.z = 0.125;
     grupo.add(portadaFrontal);
 
-    // Tapa trasera
-    const portadaTrasera = new THREE.Mesh(geometriaPortada, materialPortada.clone());
+    // Tapa trasera (sin siglas)
+    const portadaTrasera = new THREE.Mesh(geometriaPortada, materialPortadaTrasera);
     portadaTrasera.position.z = -0.125;
     grupo.add(portadaTrasera);
 
     // LOMO - Lateral del libro (un poco más grueso)
     const geometriaLomo = new THREE.BoxGeometry(0.52, 0.72, 0.05);
-    const lomo = new THREE.Mesh(geometriaLomo, materialPortada.clone());
+    const materialLomo = new THREE.MeshStandardMaterial({
+      color: config.colorFondo,
+      emissive: config.colorFondo,
+      emissiveIntensity: 0.85,
+      roughness: 0.4,
+      metalness: 0.3,
+    });
+    const lomo = new THREE.Mesh(geometriaLomo, materialLomo);
     lomo.rotation.y = Math.PI / 2; // Rotar 90° para que sea el lateral
     lomo.position.x = -0.225;
     grupo.add(lomo);

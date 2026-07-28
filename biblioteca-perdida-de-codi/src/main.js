@@ -122,7 +122,7 @@ function calcularPosicionInicioCodi(primeraZona) {
   return {
     x: (min.x + max.x) / 2,
     y: ALTURA_SUELO_PLANO_MVP,
-    z: min.z + 2,
+    z: max.z - 0.5, // Borde inicial de la isla (trasero), ligeramente hacia adentro
   };
 }
 
@@ -136,7 +136,7 @@ function construirCodiPoseInicial(primeraZona) {
   const posicionInicial = calcularPosicionInicioCodi(primeraZona);
   return {
     position: posicionInicial,
-    rotationY: 0,
+    rotationY: Math.PI, // 180 grados: Codi mira hacia -Z (adelante según KeyboardMouseInputProvider)
     velocity: { x: 0, y: 0, z: 0 },
     animState: 'idle',
     lastSafePosition: { ...posicionInicial },
@@ -361,22 +361,16 @@ export async function iniciarJuego(dependencias = {}) {
 
     const estado = {
       codiPose: codiPoseInicial,
-      // Además de {yaw, pitch, distanciaActual}, se incluyen de entrada
-      // `posicionCamara`/`target` calculados a partir de la pose inicial de
-      // Codi (en vez de dejarlos `undefined` hasta el primer
-      // `cameraSystem.actualizar`), para que exista siempre una vista
-      // inicial coherente apuntando a Codi, incluso si algo consultara
-      // `cameraState` antes del primer frame. Se usa la convención de -Z
-      // como "adelante" (ver KeyboardMouseInputProvider.js), por lo que la
-      // cámara se desplaza detrás de Codi en +Z (y hacia arriba en Y).
+      // Cámara posicionada DETRÁS de Codi mirando hacia -Z (adelante)
+      // Con rotationY=π, Codi mira hacia -Z, así que la cámara debe estar en +Z relativo
       cameraState: {
-        yaw: 0,
-        pitch: 0,
+        yaw: Math.PI, // Rotar 180° para que la cámara esté detrás de Codi mirando hacia -Z
+        pitch: 0, // Sin inclinación
         distanciaActual: distanciaCamaraInicial,
         posicionCamara: {
           x: codiPoseInicial.position.x,
           y: codiPoseInicial.position.y + 3,
-          z: codiPoseInicial.position.z + distanciaCamaraInicial,
+          z: codiPoseInicial.position.z + distanciaCamaraInicial, // Detrás de Codi
         },
         target: { ...codiPoseInicial.position },
       },
@@ -428,9 +422,17 @@ export async function iniciarJuego(dependencias = {}) {
     for (const libro of estado.librosActivos) {
       // Crear libro 3D personalizado según la habilidad (Python azul, JS amarillo, SQL cian)
       // usando el nuevo método crearLibroConocimiento3D() de AssetLoader que genera
-      // geometría procedural detallada con portada, páginas y lomo.
+      // geometría procedural detallada con portada, páginas y lomo con siglas distintivas.
       const modeloLibro = assetLoader.crearLibroConocimiento3D(libro.habilidadId);
+      
+      // ESCALA MEDIANA: Tamaño elegante y visible con logo distintivo
+      if (modeloLibro.scale && typeof modeloLibro.scale.set === 'function') {
+        modeloLibro.scale.set(1.6, 1.6, 1.6);
+      }
+      
+      // POSICIÓN: Usar directamente la posición elevada de zones.data.js (Y=3.0-3.2)
       modeloLibro.position.set(libro.posicion.x, libro.posicion.y, libro.posicion.z);
+      
       renderEngine.registrarModelo(modeloLibro);
       libro._objeto3D = modeloLibro;
     }
@@ -480,6 +482,14 @@ export async function iniciarJuego(dependencias = {}) {
         );
         // H03: Reproducir sonido de recolección al obtener habilidad
         uiSystem.reproducirSonidoRecoleccion();
+        
+        // UX: Hacer desaparecer el libro absorbido con efecto fade-out
+        const libroAbsorbido = estado.librosActivos.find(l => l.id === resultadoAbsorcion.libroRemovidoId);
+        if (libroAbsorbido && libroAbsorbido._objeto3D) {
+          // Iniciar fade-out: guardar tiempo de inicio y duración
+          libroAbsorbido._fadeOutInicio = Date.now();
+          libroAbsorbido._fadeOutDuracion = 800; // 800ms para desvanecer completamente
+        }
       }
 
       // --- Interacción: Mecanismos cercanos o avance del Desafío Final ---
@@ -562,6 +572,39 @@ export async function iniciarJuego(dependencias = {}) {
         }
       }
 
+      // --- UX: Actualizar fade-out de libros absorbidos ---
+      const ahora = Date.now();
+      for (const libro of estado.librosActivos) {
+        if (libro._fadeOutInicio && libro._objeto3D) {
+          const tiempoTranscurrido = ahora - libro._fadeOutInicio;
+          const progreso = Math.min(tiempoTranscurrido / libro._fadeOutDuracion, 1.0);
+          
+          // Calcular opacidad: de 1.0 a 0.0
+          const opacidad = 1.0 - progreso;
+          
+          // Aplicar opacidad a todos los materiales del libro
+          libro._objeto3D.traverse((child) => {
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach(mat => {
+                  mat.transparent = true;
+                  mat.opacity = opacidad;
+                });
+              } else {
+                child.material.transparent = true;
+                child.material.opacity = opacidad;
+              }
+            }
+          });
+          
+          // Si el fade-out terminó, remover el libro de la escena
+          if (progreso >= 1.0) {
+            renderEngine.removerModelo(libro._objeto3D);
+            libro._fadeOutInicio = null; // Marcar como procesado
+          }
+        }
+      }
+
       // --- Detectar entrada al Portal (Victoria Final por contacto con portal) ---
       if (renderEngine._portalRestauracion && !estado.juegoPausado) {
         const tiene3Habilidades = progreso.tieneHabilidad('python') && 
@@ -584,8 +627,11 @@ export async function iniciarJuego(dependencias = {}) {
             // ¡Codi ha entrado al portal! → Victoria Final con celebración
             estado.juegoPausado = true;
             
-            // Reproducir fanfarria de victoria
-            uiSystem.reproducirSonidoVictoria();
+            // DETENER música de fondo inmediatamente
+            uiSystem.detenerMusicaFondo();
+            
+            // Reproducir fanfarria triunfal épica
+            uiSystem.reproducirFanfarriaVictoria();
             
             // Generar confeti en pantalla
             uiSystem.mostrarConfeti(contenedorOverlay);
@@ -608,8 +654,12 @@ export async function iniciarJuego(dependencias = {}) {
       // --- Detectar Victoria (Desafío Final completado o entrada al Portal) ---
       if (progreso.desafioCompletado() && !estado.juegoPausado) {
         estado.juegoPausado = true;
-        // H03: Reproducir sonido de Victoria
-        uiSystem.reproducirSonidoVictoria();
+        
+        // DETENER música de fondo inmediatamente
+        uiSystem.detenerMusicaFondo();
+        
+        // Reproducir fanfarria triunfal épica
+        uiSystem.reproducirFanfarriaVictoria();
       }
     }
 
@@ -627,6 +677,14 @@ export async function iniciarJuego(dependencias = {}) {
     // En entorno de test (cuando se inyectan dependencias), saltamos la terminal
     // para no bloquear los tests automatizados.
     const esEntornoTest = Boolean(dependencias.RenderEngineClase || dependencias.document);
+    
+    // Registrar callback para centrar cámara desde el botón del HUD
+    uiSystem.registrarCallbackCentrarCamara(() => {
+      // Centrar cámara directamente detrás de Codi (yaw=Math.PI, mirando hacia -Z)
+      estado.cameraState.yaw = Math.PI;
+      estado.cameraState.pitch = 0;
+      uiSystem.mostrarMensaje('Cámara centrada', 1500, Date.now());
+    });
     
     if (!esEntornoTest) {
       estado.juegoPausado = true; // Pausar el juego inicialmente
@@ -673,7 +731,7 @@ export async function iniciarJuego(dependencias = {}) {
         const posicionInicial = calcularPosicionInicioCodi(primeraZona);
         estado.codiPose = {
           position: posicionInicial,
-          rotationY: 0,
+          rotationY: Math.PI,
           velocity: { x: 0, y: 0, z: 0 },
           animState: 'idle',
           lastSafePosition: { ...posicionInicial },
@@ -681,7 +739,7 @@ export async function iniciarJuego(dependencias = {}) {
         
         // Reiniciar estado de cámara para evitar posiciones extrañas
         estado.cameraState = {
-          yaw: 0,
+          yaw: Math.PI, // Rotar 180° para que la cámara esté detrás de Codi
           pitch: 0,
           distanciaActual: distanciaCamaraInicial,
           posicionCamara: {
@@ -697,6 +755,9 @@ export async function iniciarJuego(dependencias = {}) {
         
         // Mostrar mensaje de reinicio
         uiSystem.mostrarMensaje('¡Juego reiniciado! Explora la Isla de nuevo.', 4000, Date.now());
+        
+        // REINICIAR MÚSICA DE FONDO
+        uiSystem.iniciarMusicaFondo();
       });
     }
 
@@ -737,6 +798,20 @@ export async function iniciarJuego(dependencias = {}) {
           progreso.marcarDesafioCompletado();
         }
         
+        // Pausar juego y activar celebración de victoria
+        if (!estado.juegoPausado) {
+          estado.juegoPausado = true;
+          
+          // DETENER música de fondo inmediatamente
+          uiSystem.detenerMusicaFondo();
+          
+          // Reproducir fanfarria triunfal épica
+          uiSystem.reproducirFanfarriaVictoria();
+          
+          // Generar confeti en pantalla
+          uiSystem.mostrarConfeti(contenedorOverlay);
+        }
+        
         // eslint-disable-next-line no-console
         console.log('[Demo Mode] Victoria forzada - Progreso al 100%');
       }
@@ -771,7 +846,7 @@ export async function iniciarJuego(dependencias = {}) {
         const posicionInicial = calcularPosicionInicioCodi(primeraZona);
         estado.codiPose = {
           position: posicionInicial,
-          rotationY: 0,
+          rotationY: Math.PI,
           velocity: { x: 0, y: 0, z: 0 },
           animState: 'idle',
           lastSafePosition: { ...posicionInicial },
@@ -779,7 +854,7 @@ export async function iniciarJuego(dependencias = {}) {
         
         // Reiniciar estado de cámara para evitar posiciones extrañas
         estado.cameraState = {
-          yaw: 0,
+          yaw: Math.PI, // Rotar 180° para que la cámara esté detrás de Codi
           pitch: 0,
           distanciaActual: distanciaCamaraInicial,
           posicionCamara: {
@@ -789,6 +864,10 @@ export async function iniciarJuego(dependencias = {}) {
           },
           target: { ...posicionInicial },
         };
+        
+        // REINICIAR MÚSICA DE FONDO
+        uiSystem.detenerMusicaFondo(); // Primero detener cualquier música activa
+        uiSystem.iniciarMusicaFondo();  // Luego iniciar de nuevo
         
         uiSystem.mostrarMensaje('⚡ Demo reiniciada', 2000, Date.now());
         // eslint-disable-next-line no-console

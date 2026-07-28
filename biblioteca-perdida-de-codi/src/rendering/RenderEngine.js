@@ -593,20 +593,55 @@ export class RenderEngine {
     /**
      * @private - PORTAL DE RESTAURACIÓN: Puerta final al final de la última isla.
      * Se activa visualmente al 100% cuando Codi obtiene las 3 habilidades (Python, JS, SQL).
-     * Posicionado en el borde este de la última zona (biblioteca-corrupta).
+     * Posicionado en línea recta al final del circuito (X=0, Z=-65).
      */
-    const ultimaZona = ZONAS[ZONAS.length - 1];
     const portalRestauracion = this._crearPortalRestauracion();
     
-    // Posicionar portal en el borde este (salida) de la última zona
-    const bordeEstePortal = ultimaZona.limites.max.x - 2;
-    const centroZPortal = (ultimaZona.limites.min.z + ultimaZona.limites.max.z) / 2;
-    portalRestauracion.position.set(bordeEstePortal, 0, centroZPortal);
+    // Posicionar portal en línea recta al final del circuito
+    portalRestauracion.position.set(0, 0, -65);
     
     this._scene.add(portalRestauracion);
     
     // Guardar referencia al portal para controlarlo desde main.js
     this._portalRestauracion = portalRestauracion;
+
+    /**
+     * @private - OBSTÁCULOS DE SALTO: Plataformas/escalones procedurales
+     * distribuidos en la línea recta del circuito para dar propósito a la
+     * mecánica de salto. Cada obstáculo es una pequeña caja elevada que
+     * Codi puede superar presionando Espacio mientras avanza con 'W'.
+     * Estilo tecnológico/AWS con bordes neón.
+     */
+    const obstaculos = [
+      { x: 0, y: 0, z: -10, altura: 0.6, ancho: 3, profundidad: 1.2, color: 0x38bdf8 },  // Entre spawn y libro Python
+      { x: 0, y: 0, z: -28, altura: 0.7, ancho: 3.5, profundidad: 1.5, color: 0xf7df1e }, // Entre zonas 2-3
+      { x: 0, y: 0, z: -50, altura: 0.8, ancho: 4, profundidad: 1.8, color: 0xFF9900 },   // Cerca del portal final
+    ];
+
+    for (const obs of obstaculos) {
+      const geometriaObstaculo = new THREE.BoxGeometry(obs.ancho, obs.altura, obs.profundidad);
+      const materialObstaculo = new THREE.MeshStandardMaterial({
+        color: obs.color,
+        emissive: obs.color,
+        emissiveIntensity: 0.3,
+        roughness: 0.5,
+        metalness: 0.6,
+      });
+      
+      const obstaculo = new THREE.Mesh(geometriaObstaculo, materialObstaculo);
+      obstaculo.position.set(obs.x, obs.y + obs.altura / 2, obs.z);
+      
+      // Bordes neón opcionales (líneas de contorno)
+      const geometriaBorde = new THREE.EdgesGeometry(geometriaObstaculo);
+      const materialBorde = new THREE.LineBasicMaterial({ 
+        color: obs.color, 
+        linewidth: 2,
+      });
+      const borde = new THREE.LineSegments(geometriaBorde, materialBorde);
+      obstaculo.add(borde);
+      
+      this._scene.add(obstaculo);
+    }
 
     /**
      * @private - HACKATHON AWS: flechas direccionales entre zonas/islas
@@ -1061,9 +1096,9 @@ export class RenderEngine {
     grupo.userData.portalInterior = portalInterior;
     grupo.userData.esPortalRestauracion = true;
 
-    // ROTACIÓN: Orientar el portal DE FRENTE al camino (90 grados en Y)
-    // para que Codi pueda atravesarlo directamente sin chocar de lado
-    grupo.rotation.y = Math.PI / 2;
+    // ROTACIÓN: Orientar el portal DE FRENTE al camino (perpendicular al eje Z)
+    // para que Codi pueda atravesarlo directamente mirando hacia -Z
+    grupo.rotation.y = 0; // Sin rotación: portal mirando hacia +Z (de frente a Codi que viene desde +Z)
 
     return grupo;
   }

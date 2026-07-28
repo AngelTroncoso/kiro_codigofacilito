@@ -286,10 +286,20 @@ export class MovementSystem {
       animState = 'run';
     }
 
-    // --- rotationY: apunta hacia la dirección de movimiento si hay desplazamiento horizontal ---
+    // --- rotationY: apunta hacia la dirección de movimiento si hay input del jugador ---
+    // IMPORTANTE: Solo actualizar rotación cuando el jugador está presionando teclas de movimiento,
+    // no basarnos en velocidad resultante para evitar inversiones al aterrizar
     let nuevaRotationY = poseActual.rotationY;
-    if (magnitudHorizontal > 1e-6) {
-      nuevaRotationY = Math.atan2(velocidadHorizontalResultante.x, velocidadHorizontalResultante.z);
+    const hayInputHorizontal = Math.abs(inputState.vectorMovimiento.x) > 1e-6 || 
+                               Math.abs(inputState.vectorMovimiento.z) > 1e-6;
+    
+    if (hayInputHorizontal && !enElAireFinal) {
+      // Calcular rotación basada en el INPUT del jugador, no en la velocidad resultante
+      const direccionMundo = rotarPorYaw(
+        { x: inputState.vectorMovimiento.x, z: inputState.vectorMovimiento.z }, 
+        poseActual.rotationY
+      );
+      nuevaRotationY = Math.atan2(direccionMundo.x, direccionMundo.z);
     }
 
     // --- 6. Adherencia a plataforma móvil activa (Requirements 5.4) ---

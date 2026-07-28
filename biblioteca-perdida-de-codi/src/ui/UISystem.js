@@ -136,6 +136,20 @@ export class UISystem {
      * @private
      */
     this._musicaMuteada = false;
+
+    /**
+     * ID del timeout del loop de música de fondo, para poder cancelarlo.
+     * @type {number | null}
+     * @private
+     */
+    this._timeoutMusicaId = null;
+
+    /**
+     * Callback para centrar la cámara detrás de Codi (llamado desde el botón HUD).
+     * @type {(() => void) | null}
+     * @private
+     */
+    this._onCentrarCamaraCallback = null;
   }
 
   /**
@@ -414,6 +428,32 @@ export class UISystem {
       });
 
       panelControles.appendChild(btnMute);
+
+      // Botón de Centrar Cámara (alineación automática)
+      const btnCentrarCamara = doc.createElement('button');
+      btnCentrarCamara.id = 'ui-system-btn-centrar-camara';
+      btnCentrarCamara.className = 'btn-icon';
+      btnCentrarCamara.textContent = '🎯';
+      btnCentrarCamara.title = 'Centrar cámara detrás de Codi';
+      btnCentrarCamara.style.marginTop = '8px';
+      btnCentrarCamara.style.padding = '8px 12px';
+      btnCentrarCamara.style.fontSize = '18px';
+      btnCentrarCamara.style.cursor = 'pointer';
+      btnCentrarCamara.style.background = 'rgba(15, 23, 42, 0.8)';
+      btnCentrarCamara.style.border = '1px solid var(--hud-accent-cyan)';
+      btnCentrarCamara.style.borderRadius = '6px';
+      btnCentrarCamara.style.color = 'var(--color-text-primary)';
+      btnCentrarCamara.style.transition = 'all 0.2s ease';
+      btnCentrarCamara.style.pointerEvents = 'auto';
+      
+      btnCentrarCamara.addEventListener('click', () => {
+        if (this._onCentrarCamaraCallback) {
+          this._onCentrarCamaraCallback();
+        }
+        this.reproducirSonidoClick();
+      });
+
+      panelControles.appendChild(btnCentrarCamara);
 
       overlay.appendChild(panelControles);
 
@@ -726,82 +766,77 @@ export class UISystem {
   }
 
   /**
-   * H03: Sonido de Victoria - Arpegio ascendente de 3 notas (fanfarria).
-   * Celebración épica pero breve para el momento de Victoria.
+   * H03: Fanfarria de Victoria - Secuencia épica triunfal estilo 8-bit.
+   * Melodía ascendente celebratoria que reemplaza la música de fondo al ganar.
    * @returns {void}
    */
-  reproducirSonidoVictoria() {
+  reproducirFanfarriaVictoria() {
     this._inicializarAudio();
     
     if (!this._audioContext) return;
 
     try {
       const ahora = this._audioContext.currentTime;
-      // Arpegio Do-Mi-Sol en octava alta: C5-E5-G5
-      const notas = [523.25, 659.25, 783.99]; // Hz
-      const duracionNota = 0.25;
-      const espacioEntreNotas = 0.15;
       
-      notas.forEach((frecuencia, index) => {
-        const tiempoInicio = ahora + (index * espacioEntreNotas);
+      // Fanfarria épica triunfal: Do-Mi-Sol-Do (arpegio ascendente) + acorde final
+      // Frecuencias en Hz: C5, E5, G5, C6, E6, G6 (octavas altas para efecto triunfal)
+      const fanfarria = [
+        { frecuencia: 523.25, duracion: 0.2, volumen: 0.25 },  // C5
+        { frecuencia: 659.25, duracion: 0.2, volumen: 0.25 },  // E5
+        { frecuencia: 783.99, duracion: 0.2, volumen: 0.25 },  // G5
+        { frecuencia: 1046.50, duracion: 0.3, volumen: 0.28 }, // C6 (más largo)
+        { frecuencia: 1318.51, duracion: 0.3, volumen: 0.28 }, // E6
+        { frecuencia: 1567.98, duracion: 0.5, volumen: 0.30 }, // G6 (final épico largo)
+      ];
+      
+      let tiempoAcumulado = 0;
+      
+      fanfarria.forEach(({ frecuencia, duracion, volumen }) => {
+        const tiempoInicio = ahora + tiempoAcumulado;
         
         const oscilador = this._audioContext.createOscillator();
-        oscilador.type = 'triangle';
+        oscilador.type = 'square'; // Onda cuadrada = chiptune clásico
         oscilador.frequency.setValueAtTime(frecuencia, tiempoInicio);
         
         const nodoGanancia = this._audioContext.createGain();
-        nodoGanancia.gain.setValueAtTime(0.18, tiempoInicio);
-        nodoGanancia.gain.exponentialRampToValueAtTime(0.01, tiempoInicio + duracionNota);
+        nodoGanancia.gain.setValueAtTime(volumen, tiempoInicio);
+        // Fade out en el último 20% de la nota
+        nodoGanancia.gain.linearRampToValueAtTime(volumen * 0.7, tiempoInicio + duracion * 0.8);
+        nodoGanancia.gain.exponentialRampToValueAtTime(0.01, tiempoInicio + duracion);
         
         oscilador.connect(nodoGanancia);
         nodoGanancia.connect(this._audioContext.destination);
         
         oscilador.start(tiempoInicio);
-        oscilador.stop(tiempoInicio + duracionNota);
-      });
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.warn('[UISystem] Error reproduciendo sonido de victoria:', error);
-    }
-  }
-
-  /**
-   * H03: Sonido de Victoria - Arpegio ascendente de 3 notas (fanfarria).
-   * Celebración épica pero breve para el momento de Victoria.
-   * @returns {void}
-   */
-  reproducirSonidoVictoria() {
-    this._inicializarAudio();
-    
-    if (!this._audioContext) return;
-
-    try {
-      const ahora = this._audioContext.currentTime;
-      // Arpegio Do-Mi-Sol en octava alta: C5-E5-G5
-      const notas = [523.25, 659.25, 783.99]; // Hz
-      const duracionNota = 0.25;
-      const espacioEntreNotas = 0.15;
-      
-      notas.forEach((frecuencia, index) => {
-        const tiempoInicio = ahora + (index * espacioEntreNotas);
+        oscilador.stop(tiempoInicio + duracion);
         
+        tiempoAcumulado += duracion * 0.9; // Ligero solapamiento entre notas
+      });
+
+      // Acorde final triunfal (Do mayor octava alta: C6 + E6 + G6 simultáneos)
+      const tiempoAcordeFinal = ahora + tiempoAcumulado;
+      const duracionAcorde = 1.0;
+      const acordeMayor = [1046.50, 1318.51, 1567.98]; // C6, E6, G6
+      
+      acordeMayor.forEach(frecuencia => {
         const oscilador = this._audioContext.createOscillator();
-        oscilador.type = 'triangle';
-        oscilador.frequency.setValueAtTime(frecuencia, tiempoInicio);
+        oscilador.type = 'square';
+        oscilador.frequency.setValueAtTime(frecuencia, tiempoAcordeFinal);
         
         const nodoGanancia = this._audioContext.createGain();
-        nodoGanancia.gain.setValueAtTime(0.18, tiempoInicio);
-        nodoGanancia.gain.exponentialRampToValueAtTime(0.01, tiempoInicio + duracionNota);
+        nodoGanancia.gain.setValueAtTime(0.15, tiempoAcordeFinal);
+        nodoGanancia.gain.linearRampToValueAtTime(0.15, tiempoAcordeFinal + duracionAcorde * 0.7);
+        nodoGanancia.gain.exponentialRampToValueAtTime(0.01, tiempoAcordeFinal + duracionAcorde);
         
         oscilador.connect(nodoGanancia);
         nodoGanancia.connect(this._audioContext.destination);
         
-        oscilador.start(tiempoInicio);
-        oscilador.stop(tiempoInicio + duracionNota);
+        oscilador.start(tiempoAcordeFinal);
+        oscilador.stop(tiempoAcordeFinal + duracionAcorde);
       });
     } catch (error) {
       // eslint-disable-next-line no-console
-      console.warn('[UISystem] Error reproduciendo sonido de victoria:', error);
+      console.warn('[UISystem] Error reproduciendo fanfarria de victoria:', error);
     }
   }
 
@@ -860,8 +895,8 @@ export class UISystem {
           tiempoAcumulado += duracion;
         });
 
-        // Programar siguiente loop
-        setTimeout(reproducirMelodia, tiempoAcumulado * 1000);
+        // Programar siguiente loop (guardar ID para poder cancelarlo)
+        this._timeoutMusicaId = setTimeout(reproducirMelodia, tiempoAcumulado * 1000);
       };
 
       this._musicaReproduciendose = true;
@@ -873,11 +908,20 @@ export class UISystem {
   }
 
   /**
-   * H03: Detiene la música de fondo.
+   * H03: Detiene la música de fondo inmediatamente.
+   * Cancela el loop y limpia todos los osciladores activos.
    * @returns {void}
    */
   detenerMusicaFondo() {
     this._musicaReproduciendose = false;
+    
+    // Cancelar el timeout del loop
+    if (this._timeoutMusicaId !== null) {
+      clearTimeout(this._timeoutMusicaId);
+      this._timeoutMusicaId = null;
+    }
+    
+    // Detener osciladores activos (si los hubiera guardados)
     this._osciladoresMusicaActivos.forEach(({ oscilador }) => {
       try {
         oscilador.stop();
@@ -988,9 +1032,9 @@ export class UISystem {
   }
 
   /**
-   * Muestra un overlay modal de introducción estilo "AWS Cloud Terminal"
-   * con el storytelling del juego, misión, controles y botón para comenzar.
-   * Se monta en el DOM como overlay modal y se remueve al hacer clic en el botón.
+   * Muestra un overlay modal de introducción estilo Portada de Videojuego Comercial
+   * con arte oficial de Codi (codi-cover.jpg), storytelling, controles y botón para comenzar.
+   * Layout de 2 columnas: Arte izquierda, Info derecha (responsive: stack vertical en móvil).
    * 
    * @param {HTMLElement} contenedorHTML - Elemento del DOM donde montar el modal
    * @param {() => void} onStartCallback - Callback a ejecutar cuando el usuario hace clic en "Comenzar Misión"
@@ -999,168 +1043,286 @@ export class UISystem {
   mostrarTerminalInicio(contenedorHTML, onStartCallback) {
     const doc = contenedorHTML.ownerDocument ?? document;
 
-    // Crear overlay modal de pantalla completa
+    // Crear overlay modal de pantalla completa con backdrop blur
     const overlay = doc.createElement('div');
     overlay.id = 'terminal-inicio-overlay';
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100%';
-    overlay.style.height = '100%';
-    overlay.style.backgroundColor = 'rgba(7, 11, 25, 0.95)';
-    overlay.style.zIndex = '10000';
-    overlay.style.display = 'flex';
-    overlay.style.alignItems = 'center';
-    overlay.style.justifyContent = 'center';
-    overlay.style.pointerEvents = 'auto';
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(7, 11, 25, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: auto;
+      padding: 20px;
+      opacity: 0;
+      animation: fadeInScale 0.6s ease-out forwards;
+    `;
 
-    // Contenedor del terminal (estilo AWS Cloud Terminal)
-    const terminal = doc.createElement('div');
-    terminal.style.maxWidth = '700px';
-    terminal.style.width = '90%';
-    terminal.style.backgroundColor = 'rgba(15, 23, 42, 0.98)';
-    terminal.style.border = '3px solid #FF9900';
-    terminal.style.borderRadius = '12px';
-    terminal.style.padding = '32px';
-    terminal.style.boxShadow = '0 0 40px rgba(255, 153, 0, 0.5), 0 0 80px rgba(255, 153, 0, 0.2)';
-    terminal.style.color = '#e2e8f0';
-    terminal.style.fontFamily = "'Courier New', monospace";
-    terminal.style.lineHeight = '1.8';
+    // Inyectar animaciones CSS (solo una vez)
+    if (!doc.getElementById('game-cover-animations')) {
+      const style = doc.createElement('style');
+      style.id = 'game-cover-animations';
+      style.textContent = `
+        @keyframes fadeInScale {
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes pulse {
+          0%, 100% { box-shadow: 0 0 20px rgba(56, 189, 248, 0.4); }
+          50% { box-shadow: 0 0 30px rgba(56, 189, 248, 0.7), 0 0 40px rgba(255, 153, 0, 0.3); }
+        }
+        @keyframes buttonPulse {
+          0%, 100% { transform: translateY(0) scale(1); }
+          50% { transform: translateY(-2px) scale(1.02); }
+        }
+        @media (max-width: 768px) {
+          .modal-container-two-col {
+            flex-direction: column !important;
+          }
+          .modal-col-left {
+            min-width: 100% !important;
+          }
+        }
+      `;
+      doc.head.appendChild(style);
+    }
 
-    // Header: Logo AWS + Título del terminal
-    const header = doc.createElement('div');
-    header.style.textAlign = 'center';
-    header.style.marginBottom = '24px';
-    header.style.borderBottom = '2px solid #FF9900';
-    header.style.paddingBottom = '16px';
+    // Contenedor principal de 2 columnas
+    const container = doc.createElement('div');
+    container.className = 'modal-container-two-col';
+    container.style.cssText = `
+      display: flex;
+      flex-direction: row;
+      gap: 2.5rem;
+      align-items: center;
+      max-width: 1200px;
+      width: 95vw;
+      max-height: 90vh;
+      padding: 2.5rem;
+      background: rgba(15, 23, 42, 0.95);
+      border: 2px solid #FF9900;
+      box-shadow: 0 0 30px rgba(255, 153, 0, 0.3);
+      border-radius: 16px;
+    `;
 
-    const awsLogo = doc.createElement('div');
-    awsLogo.style.fontSize = '20px';
-    awsLogo.style.fontWeight = 'bold';
-    awsLogo.style.color = '#FF9900';
-    awsLogo.style.marginBottom = '8px';
-    awsLogo.textContent = '☁️ AWS CLOUD TERMINAL';
-    header.appendChild(awsLogo);
+    // ========== COLUMNA IZQUIERDA: ARTE DE CODI ==========
+    const columnaIzquierda = doc.createElement('div');
+    columnaIzquierda.className = 'modal-col-left';
+    columnaIzquierda.style.cssText = `
+      flex: 1;
+      min-width: 340px;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
 
-    terminal.appendChild(header);
+    const imagenCodi = doc.createElement('img');
+    imagenCodi.src = '/codi-cover.jpg';
+    imagenCodi.alt = 'Codi y la Biblioteca Perdida';
+    imagenCodi.style.cssText = `
+      width: 100%;
+      height: 100%;
+      max-height: 580px;
+      object-fit: contain;
+      border-radius: 12px;
+      border: 2px solid #38bdf8;
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
+      animation: pulse 3s ease-in-out infinite;
+    `;
 
-    // TÍTULO: La Biblioteca Perdida de Codi
+    // Fallback mejorado si la imagen no carga
+    imagenCodi.addEventListener('error', () => {
+      columnaIzquierda.innerHTML = `
+        <div style="
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          min-height: 380px;
+          padding: 40px;
+          background: linear-gradient(135deg, rgba(56, 189, 248, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%);
+          border-radius: 12px;
+          border: 2px solid #38bdf8;
+          box-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
+        ">
+          <div style="
+            font-size: 120px;
+            line-height: 1;
+            margin-bottom: 20px;
+            filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.5));
+          ">🐊</div>
+          <div style="
+            font-size: 32px;
+            font-weight: 900;
+            color: #38bdf8;
+            text-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+            letter-spacing: 3px;
+          ">CODI</div>
+          <div style="
+            font-size: 14px;
+            color: #cbd5e1;
+            margin-top: 12px;
+            text-align: center;
+            max-width: 250px;
+          ">El guardián del conocimiento digital</div>
+        </div>
+      `;
+    });
+
+    columnaIzquierda.appendChild(imagenCodi);
+    container.appendChild(columnaIzquierda);
+
+    // ========== COLUMNA DERECHA: INFORMACIÓN DEL JUEGO ==========
+    const columnaDerecha = doc.createElement('div');
+    columnaDerecha.style.cssText = `
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      color: #e2e8f0;
+      font-family: 'Segoe UI', 'Arial', sans-serif;
+    `;
+
+    // Badge AWS Cloud Terminal
+    const badge = doc.createElement('div');
+    badge.style.cssText = `
+      display: inline-block;
+      padding: 8px 16px;
+      background-color: rgba(255, 153, 0, 0.2);
+      border: 2px solid #FF9900;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: bold;
+      color: #FF9900;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      align-self: flex-start;
+    `;
+    badge.textContent = '☁️ AWS CLOUD TERMINAL v1.0';
+    columnaDerecha.appendChild(badge);
+
+    // Título
     const titulo = doc.createElement('h1');
-    titulo.style.fontSize = '28px';
-    titulo.style.fontWeight = 'bold';
-    titulo.style.color = '#38bdf8';
-    titulo.style.textAlign = 'center';
-    titulo.style.marginBottom = '24px';
-    titulo.style.textShadow = '0 0 10px rgba(56, 189, 248, 0.5)';
-    titulo.textContent = 'LA BIBLIOTECA PERDIDA DE CODI';
-    terminal.appendChild(titulo);
+    titulo.style.cssText = `
+      font-size: 40px;
+      font-weight: 900;
+      color: #fbbf24;
+      margin: 0;
+      text-shadow: 0 0 20px rgba(251, 191, 36, 0.8);
+      line-height: 1.1;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    `;
+    titulo.innerHTML = 'CODI <span style="color: #38bdf8;">Y LA</span><br>BIBLIOTECA PERDIDA';
+    columnaDerecha.appendChild(titulo);
 
-    // HISTORIA
-    const seccionHistoria = doc.createElement('div');
-    seccionHistoria.style.marginBottom = '20px';
+    // Lore & Misión
+    const lore = doc.createElement('div');
+    lore.style.cssText = `
+      color: #cbd5e1;
+      font-size: 15px;
+      line-height: 1.7;
+    `;
+    lore.innerHTML = `
+      <p style="margin: 0 0 12px 0;">
+        La <strong style="color: #38bdf8;">fuente del conocimiento digital</strong> ha sido fragmentada. 
+        Los lenguajes ancestrales se han perdido en las sombras de la <strong style="color: #c084fc;">corrupción</strong>.
+      </p>
+      <p style="margin: 0;">
+        Encarnas a <strong style="color: #1fce6b;">Codi</strong>. Explora la isla, recupera los 
+        <strong style="color: #fbbf24;">libros de habilidades</strong> (Python, JavaScript, SQL) y restaura la Biblioteca.
+      </p>
+    `;
+    columnaDerecha.appendChild(lore);
 
-    const labelHistoria = doc.createElement('div');
-    labelHistoria.style.color = '#FF9900';
-    labelHistoria.style.fontWeight = 'bold';
-    labelHistoria.style.marginBottom = '8px';
-    labelHistoria.textContent = '> HISTORIA_';
-    seccionHistoria.appendChild(labelHistoria);
+    // Tarjeta de Controles
+    const tarjetaControles = doc.createElement('div');
+    tarjetaControles.style.cssText = `
+      background-color: rgba(56, 189, 248, 0.1);
+      border: 2px solid rgba(56, 189, 248, 0.3);
+      border-radius: 12px;
+      padding: 18px 22px;
+    `;
 
-    const textoHistoria = doc.createElement('div');
-    textoHistoria.style.color = '#cbd5e1';
-    textoHistoria.style.paddingLeft = '16px';
-    textoHistoria.style.fontSize = '14px';
-    textoHistoria.innerHTML = 'La fuente del conocimiento digital ha sido fragmentada y los lenguajes ancestrales se han perdido en las sombras de la <span style="color: #c084fc">corrupción</span>.';
-    seccionHistoria.appendChild(textoHistoria);
+    const tituloControles = doc.createElement('div');
+    tituloControles.style.cssText = `
+      font-size: 13px;
+      font-weight: bold;
+      color: #38bdf8;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    `;
+    tituloControles.textContent = '⌨️ CONTROLES';
+    tarjetaControles.appendChild(tituloControles);
 
-    terminal.appendChild(seccionHistoria);
-
-    // MISIÓN
-    const seccionMision = doc.createElement('div');
-    seccionMision.style.marginBottom = '20px';
-
-    const labelMision = doc.createElement('div');
-    labelMision.style.color = '#FF9900';
-    labelMision.style.fontWeight = 'bold';
-    labelMision.style.marginBottom = '8px';
-    labelMision.textContent = '> MISIÓN_';
-    seccionMision.appendChild(labelMision);
-
-    const textoMision = doc.createElement('div');
-    textoMision.style.color = '#cbd5e1';
-    textoMision.style.paddingLeft = '16px';
-    textoMision.style.fontSize = '14px';
-    textoMision.innerHTML = 'Encarnas a <span style="color: #1fce6b; font-weight: bold;">Codi</span>. Explora la isla, recupera los <span style="color: #38bdf8">libros de habilidades</span> (<span style="color: #fbbf24">Python</span>, <span style="color: #fbbf24">JavaScript</span>, <span style="color: #fbbf24">SQL</span>) y restaura la Biblioteca.';
-    seccionMision.appendChild(textoMision);
-
-    terminal.appendChild(seccionMision);
-
-    // CONTROLES
-    const seccionControles = doc.createElement('div');
-    seccionControles.style.marginBottom = '28px';
-
-    const labelControles = doc.createElement('div');
-    labelControles.style.color = '#FF9900';
-    labelControles.style.fontWeight = 'bold';
-    labelControles.style.marginBottom = '8px';
-    labelControles.textContent = '> CONTROLES_';
-    seccionControles.appendChild(labelControles);
-
-    const listaControles = doc.createElement('ul');
-    listaControles.style.listStyle = 'none';
-    listaControles.style.padding = '0';
-    listaControles.style.paddingLeft = '16px';
-    listaControles.style.fontSize = '14px';
+    const listaControles = doc.createElement('div');
+    listaControles.style.cssText = `
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      font-size: 13px;
+    `;
 
     const controles = [
-      { tecla: 'WASD / Flechas', accion: 'Mover' },
+      { tecla: 'WASD', accion: 'Mover' },
       { tecla: 'Espacio', accion: 'Saltar' },
-      { tecla: 'Mouse', accion: 'Rotar cámara' },
-      { tecla: 'E', accion: 'Absorber/Interactuar' },
+      { tecla: 'Mouse', accion: 'Cámara' },
+      { tecla: 'E', accion: 'Interactuar' },
     ];
 
     for (const { tecla, accion } of controles) {
-      const item = doc.createElement('li');
-      item.style.marginBottom = '6px';
+      const item = doc.createElement('div');
       item.style.color = '#cbd5e1';
-      item.innerHTML = `<span style="color: #22d3ee; font-weight: bold;">${tecla}</span> → ${accion}`;
+      item.innerHTML = `<strong style="color: #22d3ee;">${tecla}</strong> · ${accion}`;
       listaControles.appendChild(item);
     }
 
-    seccionControles.appendChild(listaControles);
-    terminal.appendChild(seccionControles);
+    tarjetaControles.appendChild(listaControles);
+    columnaDerecha.appendChild(tarjetaControles);
 
-    // BOTÓN: Comenzar Misión
+    // Botón "▶ COMENZAR MISIÓN"
     const boton = doc.createElement('button');
     boton.id = 'btn-comenzar-mision';
     boton.textContent = '▶ COMENZAR MISIÓN';
-    boton.style.display = 'block';
-    boton.style.width = '100%';
-    boton.style.padding = '16px';
-    boton.style.fontSize = '18px';
-    boton.style.fontWeight = 'bold';
-    boton.style.color = '#0f172a';
-    boton.style.backgroundColor = '#FF9900';
-    boton.style.border = 'none';
-    boton.style.borderRadius = '8px';
-    boton.style.cursor = 'pointer';
-    boton.style.fontFamily = "'Courier New', monospace";
-    boton.style.textTransform = 'uppercase';
-    boton.style.letterSpacing = '1px';
-    boton.style.boxShadow = '0 4px 20px rgba(255, 153, 0, 0.4)';
-    boton.style.transition = 'all 0.2s ease';
+    boton.style.cssText = `
+      width: 100%;
+      padding: 18px;
+      font-size: 19px;
+      font-weight: 900;
+      color: #0f172a;
+      background-color: #FF9900;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      box-shadow: 0 8px 24px rgba(255, 153, 0, 0.6);
+      transition: all 0.3s ease;
+      animation: buttonPulse 2s ease-in-out infinite;
+    `;
 
-    // Hover effect (inline para evitar crear CSS externo)
+    // Hover effects
     boton.addEventListener('mouseenter', () => {
       boton.style.backgroundColor = '#FFB84D';
-      boton.style.transform = 'translateY(-2px)';
-      boton.style.boxShadow = '0 6px 30px rgba(255, 153, 0, 0.6)';
+      boton.style.transform = 'translateY(-4px) scale(1.02)';
+      boton.style.boxShadow = '0 12px 32px rgba(255, 153, 0, 0.8)';
+      boton.style.animation = 'none';
     });
 
     boton.addEventListener('mouseleave', () => {
       boton.style.backgroundColor = '#FF9900';
-      boton.style.transform = 'translateY(0)';
-      boton.style.boxShadow = '0 4px 20px rgba(255, 153, 0, 0.4)';
+      boton.style.transform = 'translateY(0) scale(1)';
+      boton.style.boxShadow = '0 8px 24px rgba(255, 153, 0, 0.6)';
+      boton.style.animation = 'buttonPulse 2s ease-in-out infinite';
     });
 
     boton.addEventListener('click', () => {
@@ -1170,17 +1332,33 @@ export class UISystem {
       // Iniciar música de fondo chiptune
       this.iniciarMusicaFondo();
       
-      // Remover el overlay del DOM
-      overlay.remove();
+      // Animación de salida suave
+      overlay.style.opacity = '0';
+      overlay.style.transform = 'scale(0.95)';
+      overlay.style.transition = 'all 0.3s ease-out';
       
-      // Ejecutar el callback
-      if (onStartCallback) {
-        onStartCallback();
-      }
+      setTimeout(() => {
+        overlay.remove();
+        
+        // Ejecutar el callback
+        if (onStartCallback) {
+          onStartCallback();
+        }
+      }, 300);
     });
 
-    terminal.appendChild(boton);
-    overlay.appendChild(terminal);
+    columnaDerecha.appendChild(boton);
+    container.appendChild(columnaDerecha);
+    overlay.appendChild(container);
     contenedorHTML.appendChild(overlay);
+  }
+
+  /**
+   * Registra el callback que se ejecutará al hacer clic en el botón "Centrar Cámara" del HUD.
+   * @param {() => void} callback - Función a ejecutar para centrar la cámara detrás de Codi
+   * @returns {void}
+   */
+  registrarCallbackCentrarCamara(callback) {
+    this._onCentrarCamaraCallback = callback;
   }
 }
