@@ -235,6 +235,27 @@ export class MovementSystem {
       posicionYCandidata = poseActual.position.y;
     }
 
+    // Penetración de suelo al aterrizar: durante el descenso, el paso de
+    // integración puede llevar la Y candidata por DEBAJO del terreno. En ese
+    // caso `raycastSuelo` devuelve `encontrado: false` (su contrato exige
+    // `posicion.y - alturaSuelo >= 0`), lo que se interpretaría como "fuera de
+    // límites navegables" y provocaría una recuperación a `lastSafePosition`,
+    // teletransportando al personaje de vuelta al punto donde saltó.
+    //
+    // Aterrizar NO es salirse del mapa: se recorta la Y candidata al nivel del
+    // terreno para que el raycast lo detecte y se resuelva por la rama de
+    // aterrizaje. La detección real de caída fuera de límites sigue intacta,
+    // porque depende de que `muestreaAltura` devuelva `null` (sin columna de
+    // suelo) o de que la caída supere `distanciaMaximaCaida`.
+    const alturaSueloBajoCandidata = mundo.muestreaAltura(posicionHorizontal.x, posicionHorizontal.z);
+    if (
+      alturaSueloBajoCandidata !== null &&
+      alturaSueloBajoCandidata !== undefined &&
+      posicionYCandidata < alturaSueloBajoCandidata
+    ) {
+      posicionYCandidata = alturaSueloBajoCandidata;
+    }
+
     const posicionCandidata3D = { x: posicionHorizontal.x, y: posicionYCandidata, z: posicionHorizontal.z };
     const resultadoRaycast = raycastSuelo(posicionCandidata3D, mundo.muestreaAltura, distanciaMaximaCaida);
 

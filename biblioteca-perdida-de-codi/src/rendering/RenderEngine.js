@@ -59,6 +59,103 @@ const ANCHO_VOLUMEN_PARTICULAS = 18;
 const ALTO_VOLUMEN_PARTICULAS = 5;
 
 /**
+ * Semiancho (unidades del mundo, eje X) del CORREDOR CENTRAL: la franja
+ * `|x| < SEMIANCHO_CORREDOR_CENTRAL` que conecta el punto de inicio
+ * (z ≈ 4.5) con la puerta final / Portal de Restauración (z ≈ -65).
+ *
+ * Todo el circuito jugable vive en `x = 0`: spawn, los tres Libros de
+ * Conocimiento y el Portal. Este corredor se declara ZONA PROHIBIDA para
+ * decoración: ninguna palmera puede plantarse dentro, para no obstruir ni
+ * el paso ni la línea de visión hacia la puerta final.
+ *
+ * Las zonas abarcan `x ∈ [-10, 10]`, así que con semiancho 5 quedan dos
+ * bandas laterales de 5 unidades (`|x| ∈ [5, 10]`) donde sí se planta.
+ */
+export const SEMIANCHO_CORREDOR_CENTRAL = 5;
+
+/**
+ * Indica si una posición cae dentro del corredor central prohibido.
+ *
+ * @param {{x:number, z:number}} posicion
+ * @returns {boolean} `true` si está dentro del corredor (posición inválida
+ *   para una palmera).
+ */
+export function estaEnCorredorCentral(posicion) {
+  return Math.abs(posicion.x) < SEMIANCHO_CORREDOR_CENTRAL;
+}
+
+/**
+ * Calcula las posiciones de las palmeras decorativas de una Zona,
+ * garantizando que TODAS queden fuera del corredor central.
+ *
+ * Distribución: cuatro palmeras en las esquinas y dos intermedias en los
+ * bordes laterales, con un desplazamiento pseudoaleatorio determinista
+ * (derivado del índice, no de `Math.random`, para que el layout sea
+ * reproducible y verificable) que evita una retícula perfecta y da un
+ * aspecto natural.
+ *
+ * Cualquier candidata que caiga dentro del corredor se REUBICA empujándola
+ * a la banda lateral más cercana, en vez de descartarse, para conservar la
+ * densidad de vegetación del mapa.
+ *
+ * @param {{min:{x:number,z:number}, max:{x:number,z:number}}} limites - Límites de la Zona.
+ * @param {number} [semilla=0] - Índice de la zona, usado como semilla del jitter determinista.
+ * @returns {Array<{x:number, z:number, rotacionY:number, escala:number}>}
+ */
+export function calcularPosicionesPalmerasZona(limites, semilla = 0) {
+  const { min, max } = limites;
+
+  // Banda lateral disponible: entre el borde del corredor y el borde de la
+  // zona, con un margen interior para que la palmera no quede colgando.
+  const MARGEN_BORDE = 1.5;
+  const xBandaInterior = SEMIANCHO_CORREDOR_CENTRAL + 1.0; // Holgura sobre el corredor
+  const xBandaExterior = Math.max(xBandaInterior, Math.min(Math.abs(min.x), max.x) - MARGEN_BORDE);
+
+  // Jitter determinista en [-1, 1] a partir de la semilla y el índice.
+  const jitter = (i) => {
+    const s = Math.sin((semilla + 1) * 12.9898 + i * 78.233) * 43758.5453;
+    return (s - Math.floor(s)) * 2 - 1;
+  };
+
+  const zMin = min.z + MARGEN_BORDE;
+  const zMax = max.z - MARGEN_BORDE;
+  const zMedio = (min.z + max.z) / 2;
+
+  // 3 profundidades × 2 lados = 6 palmeras por zona, todas laterales.
+  const plantillas = [
+    { lado: -1, z: zMin },
+    { lado: 1, z: zMin },
+    { lado: -1, z: zMedio },
+    { lado: 1, z: zMedio },
+    { lado: -1, z: zMax },
+    { lado: 1, z: zMax },
+  ];
+
+  return plantillas.map((plantilla, i) => {
+    // Posición lateral con variación: se mueve dentro de la banda, nunca
+    // hacia el corredor.
+    const desplazamiento = jitter(i) * ((xBandaExterior - xBandaInterior) / 2);
+    const magnitudX = (xBandaInterior + xBandaExterior) / 2 + desplazamiento;
+
+    let x = plantilla.lado * magnitudX;
+    const z = plantilla.z + jitter(i + 100) * 0.8;
+
+    // Salvaguarda: si por cualquier ajuste de límites la candidata cayera
+    // dentro del corredor, se reubica al borde de la banda lateral.
+    if (estaEnCorredorCentral({ x, z })) {
+      x = plantilla.lado * xBandaInterior;
+    }
+
+    return {
+      x,
+      z,
+      rotacionY: jitter(i + 200) * Math.PI, // Orientación variada de la corona
+      escala: 0.9 + (jitter(i + 300) + 1) * 0.15, // 0.9 – 1.2
+    };
+  });
+}
+
+/**
  * Mapa de color por Habilidad — "Knowledge Energy System" (SPEC-05:
  * Interactive Feedback & Game Feel, sección 4). Única fuente de verdad de
  * qué color visual representa cada Habilidad en TODO efecto relacionado
@@ -535,28 +632,19 @@ export class RenderEngine {
      * (CylinderGeometry + ConeGeometry), sin assets externos. Puramente
      * decorativas, no colisionan ni afectan gameplay.
      */
-    for (const zona of ZONAS) {
-      const { min, max } = zona.limites;
-      const centroX = (min.x + max.x) / 2;
-      const centroZ = (min.z + max.z) / 2;
-      const anchoX = max.x - min.x;
-      const anchoZ = max.z - min.z;
-      
-      // 2-3 palmeras estratégicas por zona en bordes/esquinas
-      const posicionesPalmerasZona = [
-        // Esquinas
-        { x: min.x + 2, z: min.z + 2 },     // Esquina noroeste
-        { x: max.x - 2, z: min.z + 2 },     // Esquina noreste
-        { x: min.x + 2, z: max.z - 2 },     // Esquina suroeste
-        { x: max.x - 2, z: max.z - 2 },     // Esquina sureste
-        // Bordes laterales (norte/sur)
-        { x: centroX, z: min.z + 1.5 },     // Centro borde norte
-        { x: centroX, z: max.z - 1.5 },     // Centro borde sur
-      ];
-      
+    for (let indiceZona = 0; indiceZona < ZONAS.length; indiceZona += 1) {
+      const zona = ZONAS[indiceZona];
+
+      // Todas las posiciones provienen de `calcularPosicionesPalmerasZona`,
+      // que garantiza por construcción que ninguna cae dentro del corredor
+      // central (`|x| < SEMIANCHO_CORREDOR_CENTRAL`).
+      const posicionesPalmerasZona = calcularPosicionesPalmerasZona(zona.limites, indiceZona);
+
       for (const pos of posicionesPalmerasZona) {
         const palmera = this._crearPalmeraProcedural();
         palmera.position.set(pos.x, 0, pos.z);
+        palmera.rotation.y = pos.rotacionY;
+        palmera.scale.setScalar(pos.escala);
         this._scene.add(palmera);
       }
     }
@@ -852,68 +940,114 @@ export class RenderEngine {
   }
 
   /**
-   * HACKATHON AWS: Crea una palmera procedural cyberpunk usando geometrías
-   * básicas de Three.js. Decoración escenográfica para enriquecer la isla
-   * sin agregar assets externos (JPG/PNG/GLB).
-   * 
-   * - Tronco: CylinderGeometry con textura marrón/dorada, ligeramente
-   *   inclinado para simular organicidad.
-   * - Hojas: 5-6 ConeGeometry verdes cian distribuidas radialmente en la
-   *   corona, orientadas hacia afuera/arriba para simular palmera.
-   * 
-   * Puramente decorativas: no colisionan, no afectan gameplay. Se instancian
-   * en bordes/esquinas de plataformas sin obstruir el paso de Codi.
-   * 
+   * Crea una palmera procedural low-poly de silueta limpia, coherente con la
+   * estética cyberpunk del juego. Solo geometrías nativas de Three.js, sin
+   * assets externos (JPG/PNG/GLB).
+   *
+   * Diseño (rediseño estilizado):
+   *   - Tronco: 5 segmentos `CylinderGeometry` de 6 lados apilados con
+   *     radio decreciente e inclinación progresiva, formando una curva
+   *     continua y orgánica en vez de un cilindro recto.
+   *   - Corona: `IcosahedronGeometry` de baja resolución que remata la unión
+   *     entre tronco y hojas sin costuras visibles.
+   *   - Hojas: 4 frondas en forma de pirámide de 4 lados, aplanadas en la
+   *     geometría para leerse como palas, cada una en un doble pivot
+   *     (azimut + caída) que las abre radialmente y las deja caer.
+   *
+   * Geometría determinista a propósito: la variedad entre instancias se
+   * aplica desde fuera (`rotation.y` y `scale` que asigna
+   * `calcularPosicionesPalmerasZona`), lo que mantiene la silueta consistente
+   * y evita palmeras deformes por azar.
+   *
+   * Puramente decorativa: no colisiona ni afecta gameplay, y nunca se planta
+   * dentro del corredor central (ver `SEMIANCHO_CORREDOR_CENTRAL`).
+   *
    * @private
    * @returns {THREE.Group}
    */
   _crearPalmeraProcedural() {
     const grupo = new THREE.Group();
 
-    // TRONCO: CylinderGeometry marrón/dorado con inclinación leve
-    const geometriaTronco = new THREE.CylinderGeometry(0.15, 0.18, 2.5, 8);
+    // ---------- TRONCO CURVO ----------
     const materialTronco = new THREE.MeshStandardMaterial({
-      color: 0x8B7355, // Marrón/dorado
-      roughness: 0.8,
-      metalness: 0.1,
-    });
-    const tronco = new THREE.Mesh(geometriaTronco, materialTronco);
-    tronco.position.y = 1.25; // Centro del cilindro a media altura
-    // Inclinación aleatoria leve para variar visualmente
-    tronco.rotation.z = (Math.random() - 0.5) * 0.15;
-    tronco.rotation.x = (Math.random() - 0.5) * 0.15;
-    grupo.add(tronco);
-
-    // HOJAS: 5-6 ConeGeometry verde cian distribuidas radialmente
-    const geometriaHoja = new THREE.ConeGeometry(0.6, 1.2, 8);
-    const materialHoja = new THREE.MeshStandardMaterial({
-      color: 0x1fce6b, // Verde cian cyberpunk (match con cristales de conocimiento)
-      emissive: 0x1fce6b,
-      emissiveIntensity: 0.2, // Ligero glow para estética cyberpunk
-      roughness: 0.4,
-      metalness: 0.2,
+      color: 0x8b7355, // Marrón/dorado cálido (paleta existente)
+      roughness: 0.85,
+      metalness: 0.05,
+      flatShading: true, // Refuerza la lectura low-poly
     });
 
-    const cantidadHojas = 5 + Math.floor(Math.random() * 2); // 5 o 6 hojas
-    const alturaCorona = 2.3; // Justo sobre el tronco
+    const SEGMENTOS_TRONCO = 5;
+    const ALTURA_SEGMENTO = 0.52;
+    const CURVATURA = 0.13; // Radianes añadidos por segmento
+    const radioEnPaso = (k) => 0.2 - 0.09 * (k / SEGMENTOS_TRONCO);
 
-    for (let i = 0; i < cantidadHojas; i += 1) {
-      const hoja = new THREE.Mesh(geometriaHoja, materialHoja.clone());
-      
-      // Distribución radial uniforme
-      const angulo = (i / cantidadHojas) * Math.PI * 2;
-      
-      // Posición en corona
-      hoja.position.y = alturaCorona;
-      hoja.position.x = Math.cos(angulo) * 0.3;
-      hoja.position.z = Math.sin(angulo) * 0.3;
-      
-      // Rotación: inclinar hacia afuera/arriba para simular hojas de palmera
-      hoja.rotation.z = Math.cos(angulo) * (Math.PI / 3); // Inclinación hacia afuera
-      hoja.rotation.x = Math.sin(angulo) * (Math.PI / 3);
-      hoja.rotation.y = angulo; // Orientar hacia afuera radialmente
-      
-      grupo.add(hoja);
+    // Se recorre el tronco acumulando la punta de cada segmento, de modo que
+    // los segmentos encadenan sin huecos aunque cada uno esté más inclinado.
+    let puntaX = 0;
+    let puntaY = 0;
+
+    for (let i = 0; i < SEGMENTOS_TRONCO; i += 1) {
+      const angulo = CURVATURA * i;
+      const segmento = new THREE.Mesh(
+        new THREE.CylinderGeometry(radioEnPaso(i + 1), radioEnPaso(i), ALTURA_SEGMENTO, 6),
+        materialTronco
+      );
+
+      // Centro del segmento: media altura a lo largo de su propio eje inclinado.
+      segmento.position.set(
+        puntaX + Math.sin(angulo) * (ALTURA_SEGMENTO / 2),
+        puntaY + Math.cos(angulo) * (ALTURA_SEGMENTO / 2),
+        0
+      );
+      segmento.rotation.z = -angulo; // Inclina la punta hacia +X
+      grupo.add(segmento);
+
+      puntaX += Math.sin(angulo) * ALTURA_SEGMENTO;
+      puntaY += Math.cos(angulo) * ALTURA_SEGMENTO;
+    }
+
+    // ---------- CORONA (remate del tronco) ----------
+    const corona = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.17, 0),
+      materialTronco
+    );
+    corona.position.set(puntaX, puntaY, 0);
+    grupo.add(corona);
+
+    // ---------- HOJAS (4 frondas low-poly) ----------
+    const ALTURA_HOJA = 1.3;
+    const geometriaHoja = new THREE.ConeGeometry(0.3, ALTURA_HOJA, 4);
+    geometriaHoja.scale(1, 1, 0.32); // Aplana la sección → pala, no pincho
+
+    const NUM_HOJAS = 4;
+    const CAIDA_BASE = 0.42; // Radianes de caída sobre la horizontal
+
+    for (let i = 0; i < NUM_HOJAS; i += 1) {
+      // Pivot 1: reparte la hoja alrededor del tronco.
+      const pivotAzimut = new THREE.Group();
+      pivotAzimut.position.set(puntaX, puntaY, 0);
+      pivotAzimut.rotation.y = (i / NUM_HOJAS) * Math.PI * 2;
+      grupo.add(pivotAzimut);
+
+      // Pivot 2: abre la hoja a la horizontal (+90°) y la deja caer.
+      // Se alternan dos caídas para dar volumen a la corona.
+      const pivotCaida = new THREE.Group();
+      pivotCaida.rotation.x = Math.PI / 2 + (i % 2 === 0 ? CAIDA_BASE : CAIDA_BASE * 0.55);
+      pivotAzimut.add(pivotCaida);
+
+      const materialHoja = new THREE.MeshStandardMaterial({
+        // Dos tonos alternos: da profundidad a la corona sin texturas.
+        color: i % 2 === 0 ? 0x1fce6b : 0x17b95e,
+        emissive: 0x1fce6b,
+        emissiveIntensity: 0.18, // Glow sutil, coherente con los cristales
+        roughness: 0.45,
+        metalness: 0.15,
+        flatShading: true,
+      });
+
+      const hoja = new THREE.Mesh(geometriaHoja, materialHoja);
+      hoja.position.y = ALTURA_HOJA / 2; // Base en la corona, punta hacia afuera
+      pivotCaida.add(hoja);
     }
 
     return grupo;

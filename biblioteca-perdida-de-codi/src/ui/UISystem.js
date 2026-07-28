@@ -25,6 +25,8 @@
 const DURACION_MENSAJE_POR_DEFECTO_MS = 3500;
 const DURACION_MENSAJE_ERROR_MS = 24 * 60 * 60 * 1000; // ~persistente: no se auto-oculta en una sesión normal
 
+import { nombrePersonaje } from './messages.js';
+
 const OVERLAY_ROOT_ID = 'ui-system-overlay';
 
 /**
@@ -580,7 +582,8 @@ export class UISystem {
         
         const subtitulo = doc.createElement('h3');
         subtitulo.className = 'hud-text-victory';
-        subtitulo.textContent = '¡FELICIDADES CODI!';
+        // Nombre del personaje activo: "¡FELICIDADES CODI!" o "¡FELICIDADES KIRO!"
+        subtitulo.textContent = `¡FELICIDADES ${nombrePersonaje(progreso).toUpperCase()}!`;
         subtitulo.style.fontSize = '24px';
         subtitulo.style.color = '#1fce6b';
         subtitulo.style.marginBottom = '16px';

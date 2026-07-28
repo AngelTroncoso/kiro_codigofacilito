@@ -61,7 +61,12 @@ import { CameraSystem } from './camera/CameraSystem.js';
 import { AbsorptionSystem } from './absorption/AbsorptionSystem.js';
 import { AbilitySystem } from './abilities/AbilitySystem.js';
 import { UISystem } from './ui/UISystem.js';
-import { generarMensaje, generarMensajeCarenciaAdapter, generarMensajeExitoAdapter } from './ui/messages.js';
+import {
+  generarMensaje,
+  generarMensajeCarenciaAdapter,
+  generarMensajeExitoAdapter,
+  nombrePersonaje,
+} from './ui/messages.js';
 import { FinalChallenge, ZONA_DESAFIO_FINAL_ID } from './challenge/FinalChallenge.js';
 
 /**
@@ -480,7 +485,11 @@ export async function iniciarJuego(dependencias = {}) {
       const resultadoAbsorcion = absorptionSystem.revisarContacto(estado.codiPose, estado.librosActivos, progreso);
       if (resultadoAbsorcion.habilidadOtorgada) {
         uiSystem.mostrarMensaje(
-          generarMensaje({ tipo: 'absorcion', habilidadId: resultadoAbsorcion.habilidadOtorgada }),
+          generarMensaje({
+            tipo: 'absorcion',
+            habilidadId: resultadoAbsorcion.habilidadOtorgada,
+            nombrePersonaje: nombrePersonaje(progreso),
+          }),
           undefined,
           Date.now()
         );
@@ -509,7 +518,7 @@ export async function iniciarJuego(dependencias = {}) {
               if (finalChallenge.estaCompletado(estado.pasoFinalIndice)) {
                 finalChallenge.resolver(estado.pasoFinalIndice, progreso);
                 uiSystem.mostrarMensaje(
-                  '¡Has restaurado la Biblioteca Perdida del Código! El Bug Supremo se disuelve ante el conocimiento combinado de Codi.',
+                  `¡Has restaurado la Biblioteca Perdida del Código! El Bug Supremo se disuelve ante el conocimiento combinado de ${nombrePersonaje(progreso)}.`,
                   undefined,
                   Date.now()
                 );
@@ -642,7 +651,7 @@ export async function iniciarJuego(dependencias = {}) {
             
             // Mostrar mensaje emotivo de celebración
             uiSystem.mostrarMensaje(
-              '¡FELICIDADES CODI! ¡NOS SALVASTE! Gracias a ti, la Biblioteca Perdida y todos los lenguajes de programación han sido restaurados.',
+              `¡FELICIDADES ${nombrePersonaje(progreso).toUpperCase()}! ¡NOS SALVASTE! Gracias a ti, la Biblioteca Perdida y todos los lenguajes de programación han sido restaurados.`,
               10000,
               Date.now()
             );

@@ -184,21 +184,29 @@ export const LIBROS = [
     id: 'libro-python',
     habilidadId: 'python',
     zonaId: 'claro-de-llegada',
-    posicion: { x: 0, y: 3.0, z: -3 }, // Elevado para requerir salto
+    // Altura calibrada para que el libro EXIJA salto pero sea alcanzable con
+    // holgura, igual para cualquier personaje (Codi o Kiro), ya que la
+    // absorción depende solo de la pose:
+    //   - De pie (y=0) la distancia vertical 2.0 supera el radio de contacto
+    //     (1.2), así que caminando por debajo no se recoge.
+    //   - Saltando (velocidadSalto=7, gravedad=-18 => ápice ~1.30) el
+    //     personaje permanece por encima de y=0.8 durante ~0.5 s, ventana
+    //     amplia para que el contacto ocurra sin timing frame-perfect.
+    posicion: { x: 0, y: 2.0, z: -3 },
     absorbido: false,
   },
   {
     id: 'libro-javascript',
     habilidadId: 'javascript',
     zonaId: 'sendero-del-puente',
-    posicion: { x: 0, y: 3.2, z: -20 }, // Elevado para requerir salto
+    posicion: { x: 0, y: 2.0, z: -20 }, // Misma calibración que el libro de Python
     absorbido: false,
   },
   {
     id: 'libro-sql',
     habilidadId: 'sql',
     zonaId: 'plataforma-mecanica',
-    posicion: { x: 0, y: 3.0, z: -40 }, // Elevado para requerir salto
+    posicion: { x: 0, y: 2.0, z: -40 }, // Misma calibración que el libro de Python
     absorbido: false,
   },
 ];

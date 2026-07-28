@@ -9,11 +9,14 @@
  * (Property 13) de forma determinista.
  *
  * Catálogo de eventos soportados:
- *   - `{ tipo: 'absorcion', habilidadId, nombreHabilidad?, descripcionUso? }`
+ *   - `{ tipo: 'absorcion', habilidadId, nombreHabilidad?, descripcionUso?, nombrePersonaje? }`
  *     Requisito 3.3: mensaje que identifica la Habilidad obtenida y su
  *     forma general de uso. Si no se provee `nombreHabilidad`/
  *     `descripcionUso`, se buscan en `CATALOGO_HABILIDADES`
  *     (`world/catalogoHabilidades.js`) por `habilidadId`.
+ *     `nombrePersonaje` ('Codi' | 'Kiro') personaliza el saludo de gratitud;
+ *     por defecto 'Codi'. Lo inyecta `main.js` usando `nombrePersonaje()`,
+ *     ya que este módulo es puro y no accede al `ProgressStore`.
  *   - `{ tipo: 'denegado', habilidadRequerida }`
  *     Mensaje de carencia. Compatible con la firma inyectable
  *     `AbilitySystem`'s `config.generarMensajeCarencia` (ver JSDoc de
@@ -46,6 +49,30 @@ function nombreHabilidadPorId(habilidadId) {
 }
 
 /**
+ * Nombre visible del personaje activo ('Codi' o 'Kiro'), leído desde el
+ * `ProgressStore`, que es la única fuente de verdad de la selección.
+ *
+ * Centraliza aquí la traducción id → nombre para que los textos de fin de
+ * misión (mensaje del Desafío Final, felicitación del portal y panel de
+ * Victoria) no repitan el mismo condicional. Para los textos en
+ * mayúsculas basta aplicar `.toUpperCase()` sobre el resultado.
+ *
+ * Tolerante por diseño: si se recibe un progreso parcial (por ejemplo un
+ * stub sin `personajeSeleccionado`), cae a 'Codi' en vez de lanzar, para no
+ * romper el panel de Victoria.
+ *
+ * @param {{personajeSeleccionado?: () => ('codi'|'kiro')}} [progreso]
+ * @returns {'Codi'|'Kiro'}
+ */
+export function nombrePersonaje(progreso) {
+  const id =
+    typeof progreso?.personajeSeleccionado === 'function'
+      ? progreso.personajeSeleccionado()
+      : 'codi';
+  return id === 'kiro' ? 'Kiro' : 'Codi';
+}
+
+/**
  * Busca la descripción de uso de una habilidad por su id en el catálogo
  * fijo. Si no se encuentra, devuelve una descripción genérica pero no
  * vacía.
@@ -60,17 +87,25 @@ function descripcionUsoPorId(habilidadId) {
 /**
  * Mensaje contextual de absorción de una Habilidad (Requisito 3.3).
  * Incluye mensajes narrativos especiales de gratitud para cada lenguaje.
- * @param {{ habilidadId: string, nombreHabilidad?: string, descripcionUso?: string }} evento
+ *
+ * `nombrePersonaje` es OPCIONAL para preservar la pureza de esta función:
+ * `messages.js` no conoce el `ProgressStore`, así que quien orquesta el
+ * juego (`main.js`) inyecta el nombre resuelto. Si no se provee, se usa
+ * 'Codi' como valor por defecto, de modo que las llamadas existentes (y los
+ * property tests, que invocan sin este campo) siguen funcionando igual.
+ *
+ * @param {{ habilidadId: string, nombreHabilidad?: string, descripcionUso?: string, nombrePersonaje?: string }} evento
  * @returns {string}
  */
 function mensajeAbsorcion(evento) {
   const nombre = evento.nombreHabilidad ?? nombreHabilidadPorId(evento.habilidadId);
-  
+  const personaje = evento.nombrePersonaje ?? 'Codi';
+
   // Mensajes narrativos especiales de gratitud por lenguaje
   const MENSAJES_ESPECIALES = {
-    python: '¡Increíble Codi! Has recuperado el Lenguaje de la Lógica y los Datos: Python. Con él, los sistemas de la Biblioteca volverán a procesar información.',
-    javascript: '¡Gran trabajo Codi! Has restaurado el Lenguaje de la Interactividad: JavaScript. La Biblioteca vuelve a tener vida y movimiento.',
-    sql: '¡Excelente Codi! Has rescatado el Lenguaje de la Memoria: SQL. Todos los registros y ancestros del conocimiento han sido salvados.',
+    python: `¡Increíble ${personaje}! Has recuperado el Lenguaje de la Lógica y los Datos: Python. Con él, los sistemas de la Biblioteca volverán a procesar información.`,
+    javascript: `¡Gran trabajo ${personaje}! Has restaurado el Lenguaje de la Interactividad: JavaScript. La Biblioteca vuelve a tener vida y movimiento.`,
+    sql: `¡Excelente ${personaje}! Has rescatado el Lenguaje de la Memoria: SQL. Todos los registros y ancestros del conocimiento han sido salvados.`,
   };
 
   // Si existe un mensaje especial para esta habilidad, usarlo
