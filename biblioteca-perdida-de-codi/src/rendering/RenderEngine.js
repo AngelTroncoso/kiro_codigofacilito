@@ -1454,6 +1454,7 @@ export class RenderEngine {
 
     this._actualizarCorrupcionesActivas(deltaSegundos);
     this._actualizarCicloCaminata(poseCodi, deltaSegundos);
+    this._actualizarFlotacionKiro(deltaSegundos, poseCodi);
     this._actualizarParticulasAmbientales(deltaSegundos);
     this._actualizarPersonalidadCodi(poseCodi, deltaSegundos);
     this._actualizarFeedbackInteractivo(deltaSegundos);
@@ -1645,6 +1646,72 @@ export class RenderEngine {
 
     if (cola) {
       cola.rotation.y = (caminando ? Math.sin(this._faseCicloCaminata * 0.5) : 0) * amplitudCola;
+    }
+  }
+
+  /**
+   * SPEC-CHAR01: Actualiza los efectos visuales exclusivos del personaje
+   * Kiro (fantasmita) si está registrado como modelo activo. No-op seguro
+   * si el modelo activo es Codi u otro personaje.
+   *
+   * Efectos aplicados:
+   *   1. Flotación/Bobbing suave del cuerpo en eje Y (levitación fantasmal)
+   *    2. Inclinación ligera del cuerpo hacia adelante al avanzar (pitch)
+   *   3. Pulso del aura envolvente (aura violeta AWS)
+   *   4. Pulso de los halos base (violeta/azul AWS)
+   *
+   * @param {number} deltaSegundos - Tiempo transcurrido desde el último frame
+   * @param {Object} [poseCodi] - Pose actual (opcional; sin ella, no hay pitch)
+   * @returns {void}
+   */
+  _actualizarFlotacionKiro(deltaSegundos, poseCodi) {
+    const modelo = this._modeloCodi;
+    if (!modelo || !modelo.userData?.esKiro) {
+      return; // No es Kiro, no hacer nada (no-op seguro para Codi)
+    }
+
+    const cuerpoKiro = modelo.userData.cuerpoKiro;
+    const auraKiro = modelo.userData.auraKiro;
+    const haloBaseKiro = modelo.userData.haloBaseKiro;
+    const haloAzulKiro = modelo.userData.haloAzulKiro;
+
+    // Acumular tiempo para la oscilación
+    modelo.userData.tiempoFlotacion = (modelo.userData.tiempoFlotacion || 0) + deltaSegundos;
+    const t = modelo.userData.tiempoFlotacion;
+
+    // 1. BOBBING - Flotación fantasmal en eje Y
+    if (cuerpoKiro) {
+      const bobbingY = Math.sin(t * 2.5) * 0.10;
+      cuerpoKiro.position.y = 0.85 + bobbingY;
+    }
+    if (auraKiro) {
+      const bobbingY = Math.sin(t * 2.5) * 0.10;
+      auraKiro.position.y = 0.85 + bobbingY;
+    }
+
+    // 2. INCLINACIÓN AL AVANZAR (pitch) - Solo si hay velocidad horizontal
+    if (cuerpoKiro && poseCodi?.velocity) {
+      const velH = Math.sqrt(
+        poseCodi.velocity.x * poseCodi.velocity.x + 
+        poseCodi.velocity.z * poseCodi.velocity.z
+      );
+      // Interpolar suavemente hacia el pitch objetivo (más rápido = más inclinado)
+      const pitchObjetivo = Math.min(velH * 0.05, 0.15); // Máx ~8.6°
+      const pitchActual = cuerpoKiro.rotation.x;
+      cuerpoKiro.rotation.x = pitchActual + (pitchObjetivo - pitchActual) * Math.min(1, deltaSegundos * 5);
+    }
+
+    // 3. PULSO DEL AURA (aura envolvente violeta)
+    if (auraKiro && auraKiro.material) {
+      auraKiro.material.opacity = 0.10 + Math.sin(t * 1.8) * 0.05;
+    }
+
+    // 4. PULSO DE HALOS EN LA BASE (violeta + azul AWS)
+    if (haloBaseKiro && haloBaseKiro.material) {
+      haloBaseKiro.material.opacity = 0.30 + Math.sin(t * 2.0) * 0.10;
+    }
+    if (haloAzulKiro && haloAzulKiro.material) {
+      haloAzulKiro.material.opacity = 0.45 + Math.sin(t * 2.5 + 0.5) * 0.12;
     }
   }
 

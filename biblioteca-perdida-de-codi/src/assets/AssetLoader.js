@@ -859,5 +859,245 @@ export class AssetLoader {
 
     return grupo;
   }
+
+  /**
+   * SPEC-CHAR01: Crea un modelo 3D procedural del personaje "Kiro", el
+   * fantasmita blanco de AWS/Kiro Cloud. Compuesto exclusivamente por
+   * geometrías procedimentales de Three.js (cero archivos externos).
+   *
+   * Estructura visual (silueta de fantasma clásico):
+   *   - Cuerpo: esfera blanca alargada (0xFFFFFF) con emisivo suave.
+   *   - Ojos: 2 óvalos negros (0x050505) altos y juntos, con highlights.
+   *   - Faldón: 6 conos invertidos en círculo formando el borde ondeado.
+   *   - Brazos/costados: 2 pequeñas esferas laterales que oscilan al caminar.
+   *   - Halo emisivo violeta/azul AWS (0x8A2BE2 / 0x38BDF8) en la base.
+   *
+   * Convención de orientación: el frente del modelo es +Z local (ojos en
+   * `z = +0.42`), la misma que usa Codi (`ojo.position.set(x, 1.18, 0.5)`).
+   * `RenderEngine.render()` asigna `rotation.y = poseCodi.rotationY` y la
+   * pose inicial es `Math.PI`, por lo que el rostro queda mirando hacia -Z
+   * (el camino y el portal) al avanzar con 'W'.
+   *
+   * Compatibilidad con sistema de animación:
+   *   Expone `userData.partesAnimables` con EXACTAMENTE la misma estructura
+   *   que Codi ({ patasTraseras, brazos, cola, ojos, pupilas, cabeza }) para
+   *   que RenderEngine._actualizarCicloCaminata() y
+   *   _actualizarPersonalidadCodi() funcionen sin cambios, evitando romper
+   *   los 165 tests del suite.
+   *
+   * @returns {THREE.Group} Grupo Three.js con la geometría procedural de Kiro
+   */
+  crearModeloKiroProcedural() {
+    const grupo = new THREE.Group();
+
+    // ================================================================
+    // 1. CUERPO PRINCIPAL - Esfera blanca alargada tipo fantasma
+    // ================================================================
+    const geometriaCuerpo = new THREE.SphereGeometry(0.5, 32, 32);
+    const materialCuerpo = new THREE.MeshStandardMaterial({
+      color: 0xFFFFFF,           // Blanco puro (SPEC-CHAR01)
+      emissive: 0xE0E7FF,        // Emisión blanca con tinte azulado suave
+      emissiveIntensity: 0.4,    // Brillo etéreo
+      roughness: 0.25,
+      metalness: 0.1,
+    });
+
+    const cuerpo = new THREE.Mesh(geometriaCuerpo, materialCuerpo);
+    cuerpo.scale.set(1.0, 1.35, 1.0); // Alargar verticalmente estilo fantasma
+    cuerpo.position.y = 0.85; // Elevar sobre el suelo (flota)
+    grupo.add(cuerpo);
+
+    // ================================================================
+    // 2. CABEZA PIVOT - Para animaciones de idle/parpadeo/mirada
+    //    Es un grupo interno que contiene ojos y brillos, permitiendo
+    //    rotación independiente del cuerpo (compat con Codi).
+    //    IMPORTANTE: y = 1.02 es la altura base que espera
+    //    RenderEngine._actualizarRespiracionIdle().
+    // ================================================================
+    const cabeza = new THREE.Group();
+    cabeza.position.set(0, 1.02, 0);
+    grupo.add(cabeza);
+
+    // ================================================================
+    // 3. OJOS - Dos esferas negras expresivas (0x050505)
+    //
+    //    CONVENCIÓN DE ORIENTACIÓN (crítica): los ojos se colocan en
+    //    Z POSITIVO (+0.42), igual que en el modelo de Codi
+    //    (`ojo.position.set(offsetX, 1.18, 0.5)`). El motor aplica
+    //    `rotationY = Math.PI` al grupo raíz, de modo que el frente local
+    //    (+Z) termina apuntando hacia -Z en el mundo, es decir, hacia el
+    //    camino/portal. Colocarlos en Z negativo provocaba que la cara
+    //    quedara hacia la cámara y "los ojos se fueran para atrás".
+    //
+    //    La forma ovalada va en la GEOMETRÍA (no en mesh.scale) porque el
+    //    sistema de parpadeo (`_actualizarParpadeo`) escribe
+    //    `ojo.scale.y = 1` al terminar cada parpadeo, lo que aplanaría
+    //    cualquier escala vertical aplicada al mesh.
+    // ================================================================
+    const geometriaOjo = new THREE.SphereGeometry(0.12, 18, 14);
+    geometriaOjo.scale(1.0, 1.3, 0.85); // Óvalo vertical, ligeramente aplanado al frente
+
+    const materialOjoBase = new THREE.MeshStandardMaterial({
+      color: 0x050505,           // Negro casi puro (SPEC-CHAR01)
+      emissive: 0x000000,
+      emissiveIntensity: 0.0,
+      roughness: 0.15,
+      metalness: 0.85,           // Brillo tipo obsidiana
+    });
+
+    // Altura local dentro de `cabeza`: +0.18 → y ≈ 1.20 en el grupo,
+    // es decir, la mitad superior del cuerpo (mirada alta y despierta).
+    const ALTURA_OJOS_LOCAL = 0.18;
+    const SEPARACION_OJOS = 0.15; // Ojos juntos = expresión tierna
+    const PROFUNDIDAD_CARA = 0.42; // +Z local = frente
+
+    const geometriaBrillo = new THREE.SphereGeometry(0.032, 10, 8);
+    const materialBrillo = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
+
+    const ojos = [];
+    const pupilas = [];
+    for (const offsetX of [-SEPARACION_OJOS, SEPARACION_OJOS]) {
+      const ojo = new THREE.Mesh(geometriaOjo, materialOjoBase.clone());
+      ojo.position.set(offsetX, ALTURA_OJOS_LOCAL, PROFUNDIDAD_CARA);
+      cabeza.add(ojo);
+      ojos.push(ojo);
+
+      // Highlight como hijo del ojo (igual que Codi): acompaña parpadeo
+      // y mirada ambiental sin cálculos extra.
+      const brillo = new THREE.Mesh(geometriaBrillo, materialBrillo);
+      brillo.position.set(offsetX > 0 ? 0.035 : -0.035, 0.045, 0.085);
+      ojo.add(brillo);
+      pupilas.push(brillo);
+    }
+
+    // ================================================================
+    // 4. BRAZOS/COSTADOS - Dos esferitas laterales que oscilan al caminar
+    //    Compatibilidad con Codi (partesAnimables.brazos)
+    // ================================================================
+    const geometriaBrazo = new THREE.SphereGeometry(0.14, 16, 16);
+    geometriaBrazo.scale(0.85, 1.25, 0.85);
+    const materialBrazo = materialCuerpo.clone();
+
+    const brazoIzquierdo = new THREE.Mesh(geometriaBrazo, materialBrazo);
+    brazoIzquierdo.position.set(-0.5, 0.82, 0);
+    grupo.add(brazoIzquierdo);
+
+    const brazoDerecho = new THREE.Mesh(geometriaBrazo, materialBrazo.clone());
+    brazoDerecho.position.set(0.5, 0.82, 0);
+    grupo.add(brazoDerecho);
+
+    // ================================================================
+    // 5. FALDÓN DE FANTASMA CLÁSICO - 6 conos invertidos en círculo
+    //
+    //    Sustituye las esferas de la versión anterior, que generaban un
+    //    bulto/protuberancia extraña en la base. Cada cono va dentro de
+    //    un pivot Group: el cono conserva su `rotation.x = Math.PI`
+    //    (punta hacia abajo) mientras el pivot es el que oscila cuando
+    //    `_actualizarCicloCaminata` escribe `patasTraseras[i].rotation.x`,
+    //    de modo que la animación nunca voltea el faldón.
+    // ================================================================
+    const patasTraseras = [];
+    const NUM_PICOS_FALDON = 6;
+    const RADIO_FALDON = 0.36;
+    const ALTURA_FALDON = 0.26;
+
+    for (let i = 0; i < NUM_PICOS_FALDON; i += 1) {
+      const angulo = (i / NUM_PICOS_FALDON) * Math.PI * 2;
+      const x = Math.cos(angulo) * RADIO_FALDON;
+      const z = Math.sin(angulo) * RADIO_FALDON;
+
+      // Pivot: es lo que se anima (rotación suave al caminar)
+      const pivotPico = new THREE.Group();
+      pivotPico.position.set(x, ALTURA_FALDON, z);
+      grupo.add(pivotPico);
+
+      // Cono invertido: mismo material blanco suave del cuerpo
+      const cono = new THREE.Mesh(
+        new THREE.ConeGeometry(0.17, 0.34, 14),
+        materialCuerpo.clone()
+      );
+      cono.rotation.x = Math.PI; // Punta hacia abajo (faldón ondeado)
+      cono.position.y = -0.1;
+      pivotPico.add(cono);
+
+      // Dos picos opuestos actúan como "patas" para el ciclo de caminata
+      if (i === 0 || i === Math.floor(NUM_PICOS_FALDON / 2)) {
+        patasTraseras.push(pivotPico);
+      }
+    }
+
+    // ================================================================
+    // 6. COLA/PIVOT - Grupo pivot para compatibilidad con animación de cola
+    //    de Codi. En Kiro es visualmente invisible pero satisface la
+    //    interfaz de partesAnimables.
+    // ================================================================
+    const pivotCola = new THREE.Group();
+    pivotCola.position.set(0, 0.55, 0.4);
+    grupo.add(pivotCola);
+
+    // ================================================================
+    // 7. HALO EMISIVO EN LA BASE - Aura violeta/azul AWS (SPEC-CHAR01)
+    // ================================================================
+    // Halo principal violeta AWS
+    const geometriaHaloBase = new THREE.CircleGeometry(0.7, 32);
+    const materialHaloBase = new THREE.MeshBasicMaterial({
+      color: 0x8A2BE2,          // Violeta AWS (SPEC-CHAR01)
+      transparent: true,
+      opacity: 0.35,
+      side: 2, // DoubleSide
+    });
+    const haloBase = new THREE.Mesh(geometriaHaloBase, materialHaloBase);
+    haloBase.rotation.x = -Math.PI / 2; // Acostado en el suelo
+    haloBase.position.y = 0.02;
+    grupo.add(haloBase);
+
+    // Halo secundario azul AWS (más pequeño, encima)
+    const geometriaHaloAzul = new THREE.CircleGeometry(0.5, 32);
+    const materialHaloAzul = new THREE.MeshBasicMaterial({
+      color: 0x38BDF8,          // Azul AWS (SPEC-CHAR01)
+      transparent: true,
+      opacity: 0.5,
+      side: 2,
+    });
+    const haloAzul = new THREE.Mesh(geometriaHaloAzul, materialHaloAzul);
+    haloAzul.rotation.x = -Math.PI / 2;
+    haloAzul.position.y = 0.03;
+    grupo.add(haloAzul);
+
+    // Aura envolvente esférica (halo etéreo alrededor del cuerpo)
+    const geometriaAura = new THREE.SphereGeometry(0.75, 16, 16);
+    const materialAura = new THREE.MeshBasicMaterial({
+      color: 0x8A2BE2,          // Violeta AWS
+      transparent: true,
+      opacity: 0.12,
+    });
+    const aura = new THREE.Mesh(geometriaAura, materialAura);
+    aura.position.y = 0.85;
+    aura.scale.set(1.0, 1.4, 1.0);
+    grupo.add(aura);
+
+    // ================================================================
+    // 8. METADATA - Compatibilidad con sistema de animación de Codi
+    //    Estructura IDÉNTICA a la de partesAnimables de Codi.
+    // ================================================================
+    grupo.userData.esKiro = true;
+    grupo.userData.partesAnimables = {
+      patasTraseras,                           // 2 pivots del faldón oscilan
+      brazos: [brazoIzquierdo, brazoDerecho],  // Costados oscilan al caminar
+      cola: pivotCola,                         // Pivot invisible (compat)
+      ojos,                                    // Parpadeo funciona
+      pupilas,                                 // Highlights (hijos de los ojos)
+      cabeza,                                  // Idle/mirada ambiental
+    };
+
+    // Referencias adicionales para animación de flotación/bobbing
+    grupo.userData.cuerpoKiro = cuerpo;
+    grupo.userData.auraKiro = aura;
+    grupo.userData.haloBaseKiro = haloBase;
+    grupo.userData.haloAzulKiro = haloAzul;
+    grupo.userData.tiempoFlotacion = 0;
+
+    return grupo;
+  }
 }
 

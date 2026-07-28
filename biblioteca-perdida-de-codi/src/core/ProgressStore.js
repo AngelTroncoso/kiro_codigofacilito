@@ -19,8 +19,35 @@ export class ProgressStore {
     this._mecanismosResueltos = new Set();
     /** @type {boolean} */
     this._desafioCompletado = false;
+    /** 
+     * @type {'codi' | 'kiro'} 
+     * SPEC-CHAR01: Personaje seleccionado por el jugador en la Portada. 
+     * Fuente de verdad para renderizado 3D. Default: 'codi'.
+     */
+    this._personajeSeleccionado = 'codi';
     /** @type {Array<(store: ProgressStore) => void>} */
     this._listeners = [];
+  }
+
+  /**
+   * SPEC-CHAR01: Retorna el personaje seleccionado actualmente por el jugador.
+   * @returns {'codi' | 'kiro'}
+   */
+  personajeSeleccionado() {
+    return this._personajeSeleccionado;
+  }
+
+  /**
+   * SPEC-CHAR01: Actualiza el personaje seleccionado y notifica a los suscriptores.
+   * Solo acepta valores válidos: 'codi' o 'kiro'. Cualquier otro valor se ignora.
+   * @param {'codi' | 'kiro'} id - Identificador del personaje seleccionado.
+   * @returns {void}
+   */
+  seleccionarPersonaje(id) {
+    if (id === 'codi' || id === 'kiro') {
+      this._personajeSeleccionado = id;
+      this._notificar();
+    }
   }
 
   /**

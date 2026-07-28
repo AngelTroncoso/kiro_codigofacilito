@@ -1289,6 +1289,117 @@ export class UISystem {
     tarjetaControles.appendChild(listaControles);
     columnaDerecha.appendChild(tarjetaControles);
 
+    // ========== SELECTOR DE PERSONAJE ==========
+    const tarjetaSelector = doc.createElement('div');
+    tarjetaSelector.style.cssText = `
+      background-color: rgba(168, 85, 247, 0.1);
+      border: 2px solid rgba(168, 85, 247, 0.3);
+      border-radius: 12px;
+      padding: 18px 22px;
+    `;
+
+    const tituloSelector = doc.createElement('div');
+    tituloSelector.style.cssText = `
+      font-size: 13px;
+      font-weight: bold;
+      color: #c084fc;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    `;
+    tituloSelector.textContent = '🎮 ELIGE TU PERSONAJE';
+    tarjetaSelector.appendChild(tituloSelector);
+
+    // Contenedor de las tarjetas del selector
+    const contenedorTarjetas = doc.createElement('div');
+    contenedorTarjetas.style.cssText = `
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    `;
+
+    // Estado interno: personaje seleccionado por defecto
+    let personajeSeleccionado = 'codi';
+
+    // Función helper para crear tarjeta de personaje
+    const crearTarjetaPersonaje = (id, emoji, nombre, descripcion, colorBorde) => {
+      const tarjeta = doc.createElement('div');
+      tarjeta.dataset.personajeId = id;
+      tarjeta.style.cssText = `
+        padding: 12px 8px;
+        background-color: rgba(15, 23, 42, 0.6);
+        border: 2px solid ${id === personajeSeleccionado ? colorBorde : 'rgba(148, 163, 184, 0.3)'};
+        border-radius: 10px;
+        cursor: pointer;
+        text-align: center;
+        transition: all 0.25s ease;
+        box-shadow: ${id === personajeSeleccionado ? `0 0 15px ${colorBorde}66` : 'none'};
+      `;
+
+      tarjeta.innerHTML = `
+        <div style="font-size: 42px; line-height: 1; margin-bottom: 6px;">${emoji}</div>
+        <div style="font-size: 15px; font-weight: 900; color: ${colorBorde}; letter-spacing: 1px;">${nombre}</div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">${descripcion}</div>
+      `;
+
+      tarjeta.addEventListener('mouseenter', () => {
+        if (personajeSeleccionado !== id) {
+          tarjeta.style.borderColor = `${colorBorde}99`;
+          tarjeta.style.transform = 'translateY(-2px)';
+        }
+      });
+
+      tarjeta.addEventListener('mouseleave', () => {
+        if (personajeSeleccionado !== id) {
+          tarjeta.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+          tarjeta.style.transform = 'translateY(0)';
+        }
+      });
+
+      tarjeta.addEventListener('click', () => {
+        this.reproducirSonidoClick();
+        personajeSeleccionado = id;
+        
+        // Actualizar visualmente todas las tarjetas
+        for (const otraTarjeta of contenedorTarjetas.children) {
+          const otroId = otraTarjeta.dataset.personajeId;
+          if (otroId === personajeSeleccionado) {
+            const color = otroId === 'codi' ? '#1fce6b' : '#e2e8f0';
+            otraTarjeta.style.borderColor = color;
+            otraTarjeta.style.boxShadow = `0 0 15px ${color}66`;
+            otraTarjeta.style.transform = 'translateY(-2px) scale(1.02)';
+          } else {
+            otraTarjeta.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+            otraTarjeta.style.boxShadow = 'none';
+            otraTarjeta.style.transform = 'translateY(0) scale(1)';
+          }
+        }
+      });
+
+      return tarjeta;
+    };
+
+    // Crear las dos tarjetas: Codi y Kiro
+    const tarjetaCodi = crearTarjetaPersonaje(
+      'codi', 
+      '🐊', 
+      'CODI', 
+      'Caimán del Código',
+      '#1fce6b'
+    );
+    const tarjetaKiro = crearTarjetaPersonaje(
+      'kiro', 
+      '👻', 
+      'KIRO', 
+      'Fantasma Cloud',
+      '#e2e8f0'
+    );
+
+    contenedorTarjetas.appendChild(tarjetaCodi);
+    contenedorTarjetas.appendChild(tarjetaKiro);
+    tarjetaSelector.appendChild(contenedorTarjetas);
+    columnaDerecha.appendChild(tarjetaSelector);
+
     // Botón "▶ COMENZAR MISIÓN"
     const boton = doc.createElement('button');
     boton.id = 'btn-comenzar-mision';
@@ -1340,9 +1451,9 @@ export class UISystem {
       setTimeout(() => {
         overlay.remove();
         
-        // Ejecutar el callback
+        // Ejecutar el callback pasando el personaje seleccionado
         if (onStartCallback) {
-          onStartCallback();
+          onStartCallback(personajeSeleccionado);
         }
       }, 300);
     });

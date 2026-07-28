@@ -362,9 +362,13 @@ export async function iniciarJuego(dependencias = {}) {
     const estado = {
       codiPose: codiPoseInicial,
       // Cámara posicionada DETRÁS de Codi mirando hacia -Z (adelante)
-      // Con rotationY=π, Codi mira hacia -Z, así que la cámara debe estar en +Z relativo
+      // Con rotationY=π el personaje mira hacia -Z. En CameraSystem,
+      // direccionEsferica(yaw,pitch) da {x: sin(yaw), z: cos(yaw)}, por lo que
+      // yaw=0 coloca la cámara en +Z relativo al personaje: justo DETRÁS de su
+      // espalda, mirando en línea recta hacia el camino y el portal (-Z).
+      // (yaw=π la pondría delante, de cara al personaje.)
       cameraState: {
-        yaw: Math.PI, // Rotar 180° para que la cámara esté detrás de Codi mirando hacia -Z
+        yaw: 0, // Cámara a la espalda, vista alineada con el camino
         pitch: 0, // Sin inclinación
         distanciaActual: distanciaCamaraInicial,
         posicionCamara: {
@@ -680,8 +684,9 @@ export async function iniciarJuego(dependencias = {}) {
     
     // Registrar callback para centrar cámara desde el botón del HUD
     uiSystem.registrarCallbackCentrarCamara(() => {
-      // Centrar cámara directamente detrás de Codi (yaw=Math.PI, mirando hacia -Z)
-      estado.cameraState.yaw = Math.PI;
+      // Centrar cámara justo detrás de la espalda del personaje: yaw=0 la sitúa
+      // en +Z relativo, mirando en línea recta hacia el camino/portal (-Z).
+      estado.cameraState.yaw = 0;
       estado.cameraState.pitch = 0;
       uiSystem.mostrarMensaje('Cámara centrada', 1500, Date.now());
     });
@@ -689,10 +694,48 @@ export async function iniciarJuego(dependencias = {}) {
     if (!esEntornoTest) {
       estado.juegoPausado = true; // Pausar el juego inicialmente
       
-      uiSystem.mostrarTerminalInicio(contenedorOverlay, () => {
+      uiSystem.mostrarTerminalInicio(contenedorOverlay, (personajeSeleccionado) => {
         // Callback al hacer clic en "Comenzar Misión"
         estado.juegoPausado = false; // Desbloquear el juego
-        uiSystem.mostrarMensaje('¡Bienvenido a la Isla, Codi! Comienza tu aventura.', 4000, Date.now());
+        
+        // SPEC-CHAR01: Guardar el personaje seleccionado en ProgressStore
+        // (fuente de verdad) y también en el estado local para acceso rápido.
+        const personajeFinal = personajeSeleccionado || 'codi';
+        progreso.seleccionarPersonaje(personajeFinal);
+        estado.personajeSeleccionado = personajeFinal;
+        
+        // Si se eligió Kiro, reemplazar el modelo de Codi por el de Kiro
+        if (personajeFinal === 'kiro' && typeof assetLoader.crearModeloKiroProcedural === 'function') {
+          // Obtener el modelo actual de Codi (referencia interna del RenderEngine)
+          const modeloActual = renderEngine._modeloCodi;
+          
+          if (modeloActual) {
+            // Guardar posición y rotación actuales
+            const posActual = { 
+              x: modeloActual.position.x, 
+              y: modeloActual.position.y, 
+              z: modeloActual.position.z 
+            };
+            const rotActual = modeloActual.rotation.y;
+            
+            // Remover el modelo de Codi de la escena
+            renderEngine.removerModelo(modeloActual);
+            
+            // Crear y registrar el modelo de Kiro
+            const modeloKiro = assetLoader.crearModeloKiroProcedural();
+            modeloKiro.position.set(posActual.x, posActual.y, posActual.z);
+            modeloKiro.rotation.y = rotActual;
+            
+            renderEngine.registrarModelo(modeloKiro);
+            renderEngine.registrarCodi(modeloKiro); // Usa el mismo slot para animación
+            
+            uiSystem.mostrarMensaje('¡Bienvenido, Kiro! El fantasma cloud comienza su aventura.', 4000, Date.now());
+          } else {
+            uiSystem.mostrarMensaje('¡Bienvenido a la Isla, Kiro!', 4000, Date.now());
+          }
+        } else {
+          uiSystem.mostrarMensaje('¡Bienvenido a la Isla, Codi! Comienza tu aventura.', 4000, Date.now());
+        }
       });
     }
 
@@ -739,7 +782,7 @@ export async function iniciarJuego(dependencias = {}) {
         
         // Reiniciar estado de cámara para evitar posiciones extrañas
         estado.cameraState = {
-          yaw: Math.PI, // Rotar 180° para que la cámara esté detrás de Codi
+          yaw: 0, // Cámara a la espalda del personaje, mirando al camino (-Z)
           pitch: 0,
           distanciaActual: distanciaCamaraInicial,
           posicionCamara: {
@@ -854,7 +897,7 @@ export async function iniciarJuego(dependencias = {}) {
         
         // Reiniciar estado de cámara para evitar posiciones extrañas
         estado.cameraState = {
-          yaw: Math.PI, // Rotar 180° para que la cámara esté detrás de Codi
+          yaw: 0, // Cámara a la espalda del personaje, mirando al camino (-Z)
           pitch: 0,
           distanciaActual: distanciaCamaraInicial,
           posicionCamara: {
